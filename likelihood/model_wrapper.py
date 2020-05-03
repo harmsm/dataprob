@@ -274,6 +274,21 @@ class ModelWrapper:
         return names[:]
 
     @property
+    def priors(self):
+        """
+        Return a list of priors on each parameter.
+        """
+
+        self._update_parameter_map()
+
+        priors = []
+        for p in self.position_to_param:
+            priors.append(self.fit_parameters[p].prior)
+
+        return priors[:]
+
+        
+    @property
     def fit_parameters(self):
         """
         A dictionary of FitParameter instances.

@@ -427,10 +427,79 @@ class Fitter:
 
         self._bounds = bounds
 
-        # Update the underlying guesses in each FitParameter instance
+        # Update the underlying bounds in each FitParameter instance
         if self._model_is_model_wrapper:
             for i, p in enumerate(self._model.position_to_param):
                 self._model.fit_parameters[p].bounds = bounds[:,i]
+
+        self._fit_has_been_run = False
+
+    @property
+    def priors(self):
+        """
+        Priors on fit parameters.
+        """
+
+        # Grab the priors from the model wrapper in case they changed
+        if self._model_is_model_wrapper:
+            self._priors = self._model.priors
+
+        try:
+            return self._priors
+        except AttributeError:
+            return None
+
+    @priors.setter
+    def priors(self,priors):
+        """
+        Setter for priors attribute.
+        """
+
+        # Make sure the right number of priors were passed in
+        if self.num_params is not None:
+            if len(priors) != self.num_params:
+                err = "length of priors list ({}) must match the number of parameters ({})\n".format(len(priors),
+                                                                                                     self.num_params)
+                raise ValueError(err)
+
+        # Make sure each prior is a function or method that takes at least one
+        # argument but also has at most one argument that does not have a
+        # default value.
+        has_err = False
+        for i, p in enumerate(priors):
+            try:
+                if inspect.isfunction(p) or inspect.ismethod(p):
+                    num_required = 0
+                    sig = inspect.signature(p)
+                    if len(sig) == 0:
+                        has_err = True
+                    else:
+                        for param in sig:
+                            if sig[param].default is inspect._empty:
+                                num_required += 1
+                        if num_required > 1:
+                            has_err = True
+                else:
+                    has_err = True
+            except TypeError:
+                has_err = True
+
+        if has_err:
+            err = "priors must be a list of functions or methods, each of\n"
+            err += "which take the parameter as their only required argument\n"
+            err += "and returns a value that can be a float (or can be coerced\n"
+            err += "into one).\n"
+            raise ValueError(err)
+
+        # Update the underlying priors in each FitParameter instance
+        if self._model_is_model_wrapper:
+            for i, p in enumerate(self._model.position_to_param):
+                self._model.fit_parameters[p].prior = priors[i]
+
+        # If we've made it all of the way here, record the new priors
+        self._priors = priors
+        if self.num_params is None:
+            self._num_params = len(priors)
 
         self._fit_has_been_run = False
 
@@ -487,6 +556,7 @@ class Fitter:
         if self._model_is_model_wrapper:
             for i, p in enumerate(self._model.position_to_param):
                 self._model.fit_parameters[p].name = names[i]
+
 
     @property
     def y_obs(self):

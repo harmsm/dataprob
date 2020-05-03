@@ -5,10 +5,8 @@ Main class for holding fit parameters, including guesses, values, ranges, etc.
 __date__ = "2016-09-02"
 __author__ = "Michael J. Harms"
 
-import copy
+import copy, warnings, inspect
 import numpy as np
-
-import warnings
 
 _INFINITY_PROXY = 1e9
 _CLOSE_TO_ZERO = 1e6
@@ -265,6 +263,54 @@ class FitParameter:
                 warnings.warn(w,UserWarning)
 
         self._bounds = bounds
+        self._clear_fit_result()
+
+
+    @property
+    def prior(self):
+        """
+        Parameter prior.
+        """
+
+        try:
+            return self._prior
+        except AttributeError:
+            return None
+
+    @prior.setter
+    def prior(self,prior):
+
+        if prior is None:
+            return
+
+        # Make sure prior is a function or method that takes at least one
+        # argument but also has at most one argument that does not have a
+        # default value.
+        has_err = False
+        try:
+            if inspect.isfunction(prior) or inspect.ismethod(prior):
+                num_required = 0
+                sig = inspect.signature(prior)
+                if len(sig) == 0:
+                    has_err = True
+                else:
+                    for param in sig:
+                        if sig[param].default is inspect._empty:
+                            num_required += 1
+                    if num_required > 1:
+                        has_err = True
+            else:
+                has_err = True
+        except TypeError:
+            has_err = True
+
+        if has_err:
+            err =  "prior must be a function or method that takes the parameter\n"
+            err += "as its only required argument and returns a value that is a\n"
+            err += "float (or can be coerced into one).\n"
+            raise ValueError(err)
+
+        self._prior = prior
         self._clear_fit_result()
 
 

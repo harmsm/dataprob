@@ -40,27 +40,9 @@ class ContinuousPrior:
             err += "initialization (see trace).\n\n"
             raise type(e)(err) from e
 
-        # Get interval with 100% of the pdf
-        interval = self._frozen.interval(1)
-
-        # If one or both of the interval values is infinty, grab a chunk
-        # with *most* of the density.
-        if np.isinf(interval[0]) or np.isinf(interval[1]):
-            interval = self._frozen.interval(1-(1e-8))
-
-        # If we have a nan in our interval, we can't normalize the prior.
-        # Throw a warning.
-        if np.isnan(interval[0]) or np.isnan(interval[1]):
-            self._normalization = 1.0
-            self._log_normalization = 0
-            warning = "could not normalize prior pdf\n"
-            warnings.warn(warning)
-
-        # Integrate under the prior to create a log normalization
-        else:
-            steps = np.linspace(*interval,int(1e6))
-            self._normalization = np.sum(a.pdf(steps)*(steps[1]-steps[0]))
-            self._log_normalization = np.log(self._normalization)
+        # Integrate under entire distribution
+        self._normalization = self._frozen.cdf(np.inf)
+        self._log_normalization = np.log(self._normalization)
 
 
     def ln_prior(self,p):
@@ -146,9 +128,9 @@ class ExponentialPrior(ContinuousPrior):
                                               loc=loc,scale=scale,
                                               *args,**kwargs)
 
-class UniformPrior:
+class UninformativePrior:
     """
-    Uniform prior.
+    Uninformative prior.
     """
 
     def ln_prior(self,p):

@@ -88,8 +88,8 @@ class BayesianFitter(Fitter):
         if np.sum(param < self.bounds[0,:]) > 0 or np.sum(param > self.bounds[1,:]) > 0:
             return -np.inf
 
-        # otherwise, uniform
-        return 0.0
+        # Otherwise, return prior
+        return np.sum(self.priors[i](p) for i, p in enumerate(param))
 
     def ln_prob(self,param):
         """
@@ -122,7 +122,7 @@ class BayesianFitter(Fitter):
         # log posterior is log prior plus log likelihood
         return ln_prior + ln_like
 
-    def _fit(self,**kwargs):
+    def _fit(self,priors=None,**kwargs):
         """
         Fit the parameters.
 
@@ -133,6 +133,8 @@ class BayesianFitter(Fitter):
 
         Parameters
         ----------
+
+        priors: array of priors to
 
         **kwargs : keyword arguments to pass to emcee.EnsembleSampler
         """

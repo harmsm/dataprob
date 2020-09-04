@@ -54,7 +54,12 @@ class Fitter:
                 err = f"'{a}' must be set before {call_string}\n"
                 raise RuntimeError(err)
 
-    def fit(self,model=None,guesses=None,y_obs=None,bounds=None,names=None,y_stdev=None,**kwargs):
+    def fit(self,
+            model=None,guesses=None,
+            y_obs=None,
+            bounds=None,names=None,priors=None,
+            y_stdev=None,
+            **kwargs):
         """
         Fit the parameters.
 
@@ -75,10 +80,13 @@ class Fitter:
             bounds are set to -np.inf and np.inf
         names : array of str
             names of parameters.  If None, parameters assigned names p0,p1,..pN
+        priors : array of floats/methods or None
+            priors on each observation.  if None, each observation, uses
+            uninformative priors
         y_stdev : array of floats or None
             standard deviation of each observation.  if None, each observation
             is assigned an error of 1.
-        **kwargs : any remaining keywaord arguments are passed as **kwargs to
+        **kwargs : any remaining keyword arguments are passed as **kwargs to
             core engine (optimize.least_squares or emcee.EnsembleSampler)
         """
 
@@ -121,6 +129,16 @@ class Fitter:
                     self.names = self.model.names
                 else:
                     self.names = ["p{}".format(i) for i in range(len(self.guesses))]
+
+        # Record priors, grab from ModelWrapper model, or use default
+        if priors is not None:
+            self.priors = priors
+        else:
+            if self.priors is None:
+                if self._model_is_model_wrapper:
+                    self.priors = self.model.priors
+                else:
+                    self.priors = [None for _ in range(len(self.guesses))]
 
         # Record y_obs, check for preloaded, or fail
         if y_obs is not None:
@@ -466,23 +484,30 @@ class Fitter:
         # argument but also has at most one argument that does not have a
         # default value.
         has_err = False
-        for i, p in enumerate(priors):
-            try:
-                if inspect.isfunction(p) or inspect.ismethod(p):
-                    num_required = 0
-                    sig = inspect.signature(p)
-                    if len(sig) == 0:
-                        has_err = True
-                    else:
-                        for param in sig:
-                            if sig[param].default is inspect._empty:
-                                num_required += 1
-                        if num_required > 1:
+        try:
+            for i, p in enumerate(priors):
+
+                # Catch None and replace with an uninformative prior
+                if p is None:
+                    p = lambda x: 0
+                try:
+                    if inspect.isfunction(p) or inspect.ismethod(p):
+                        num_required = 0
+                        sig = inspect.signature(p)
+                        if len(sig.parameters) == 0:
                             has_err = True
-                else:
+                        else:
+                            for param in sig.parameters:
+                                if sig.parameters[param].default is inspect._empty:
+                                    num_required += 1
+                            if num_required > 1:
+                                has_err = True
+                    else:
+                        has_err = True
+                except TypeError:
                     has_err = True
-            except TypeError:
-                has_err = True
+        except TypeError:
+            has_err = False
 
         if has_err:
             err = "priors must be a list of functions or methods, each of\n"

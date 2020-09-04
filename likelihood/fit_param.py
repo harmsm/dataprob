@@ -291,11 +291,11 @@ class FitParameter:
             if inspect.isfunction(prior) or inspect.ismethod(prior):
                 num_required = 0
                 sig = inspect.signature(prior)
-                if len(sig) == 0:
+                if len(sig.parameters) == 0:
                     has_err = True
                 else:
-                    for param in sig:
-                        if sig[param].default is inspect._empty:
+                    for param in sig.parameters:
+                        if sig.parameters[param].default is inspect._empty:
                             num_required += 1
                     if num_required > 1:
                         has_err = True

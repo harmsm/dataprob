@@ -11,3 +11,4 @@ from .fitters import BootstrapFitter
 from .fitters import BayesianFitter
 from .model_wrapper import ModelWrapper
 from .fit_param import FitParameter
+from . import priors

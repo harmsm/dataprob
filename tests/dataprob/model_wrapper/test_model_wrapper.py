@@ -7,6 +7,7 @@ import pandas as pd
 
 def test_ModelWrapper___init__():
 
+
     def model_to_test_wrap(a,b=2,c=3,d="test",e=3): return a*b*c
 
     # Test argument checking

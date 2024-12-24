@@ -166,6 +166,25 @@ class VectorModelWrapper(ModelWrapper):
         self._unfixed_mask = np.array(np.logical_not(self._param_df["fixed"]),dtype=bool)
         self._unfixed_param_names = np.array(self._param_df.loc[self._unfixed_mask,"name"]).copy()
         
+        # Look for linked parameters
+        linked_param_mask = np.logical_not(pd.isnull(self._param_df.loc[:,"parent"]))
+        if np.sum(linked_param_mask) > 0:
+
+            param_links = list(self._param_df.loc[linked_param_mask,"parent"])
+
+            final_links = []
+            params_as_list = list(self._param_df["name"])
+            for link in param_links:
+                final_links.append(params_as_list.index(link))
+            
+            self._linked_all_mask = np.array(linked_param_mask,dtype=bool)
+            self._linked_param_mapper = np.array(final_links,dtype=int)
+
+        else:
+            self._linked_all_mask = np.zeros(len(self._param_df),dtype=bool)
+            self._linked_param_mapper = np.array([],dtype=int)
+
+
         # Create all param vector
         self._all_param_vector = np.array(self._param_df["guess"],dtype=float).copy()
     
@@ -234,6 +253,10 @@ class VectorModelWrapper(ModelWrapper):
         out : numpy.ndarray
             result of model(params)
         """
+
+        # Map linked parameters if any are specified
+        if len(self._linked_param_mapper) > 0:
+            self._all_param_vector[self._linked_all_mask] = params[self._linked_param_mapper]
 
         self._all_param_vector[self._unfixed_mask] = params
         return self._model_to_fit(self._all_param_vector,

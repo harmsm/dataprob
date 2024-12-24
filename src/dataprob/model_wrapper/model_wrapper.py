@@ -25,13 +25,6 @@ class ModelWrapper:
     specifying 'fit_parameters'.
     """
 
-    # Attributes to hold the fit parameters and other arguments to pass
-    # to the model. These have to be defined across class because we are going
-    # to hijack __getattr__ and __setattr__ and need to look inside this as soon
-    # as we start setting attributes.
-    _param_df = pd.DataFrame({"name":[]})
-    _non_fit_kwargs = {}
-
     def __init__(self,
                  model_to_fit,
                  fit_parameters=None,
@@ -72,9 +65,7 @@ class ModelWrapper:
         self._default_guess = check_float(value=default_guess,
                                           variable_name="default_guess")
 
-        # Re-define these here so __setattr__ and __getattr__ end up looking at
-        # instance-level (__dict__) attributes rather than class-level
-        # attributes.
+        
         self._param_df = pd.DataFrame({"name":[]})
         self._non_fit_kwargs = {}
     
@@ -82,6 +73,7 @@ class ModelWrapper:
                          fit_parameters=fit_parameters,
                          non_fit_kwargs=non_fit_kwargs)
         
+
 
     def _load_model(self,model_to_fit,fit_parameters,non_fit_kwargs):
         """
@@ -221,6 +213,15 @@ class ModelWrapper:
         self._unfixed_mask = np.logical_not(self._param_df.loc[:,"fixed"])
         self._unfixed_param_names = np.array(self._param_df.loc[self._unfixed_mask,"name"]).copy()
 
+        # look for linked parameters
+        linked_param_mask = np.logical_not(pd.isna(self._param_df.loc[:,"parent"]))
+        if np.sum(linked_param_mask) > 0:
+            param_names = list(self._param_df.loc[linked_param_mask,"name"])
+            param_links = list(self._param_df.loc[linked_param_mask,"parent"])
+            self._linked_params = zip(param_names,param_links)
+        else:
+            self._linked_params = {}
+
         # Build a dictionary of keyword arguments to pass to the model when
         # called. 
         self._mw_kwargs = {}
@@ -313,12 +314,9 @@ class ModelWrapper:
             err += f"or the number of unfixed parameters ({np.sum(self._unfixed_mask)}).\n"
             raise ValueError(err)
 
-        # Update kwargs
-        for i in range(len(params)):
-            self._mw_kwargs[self._unfixed_param_names[i]] = params[i]
-
+        # Run underlying fast model
         try:
-            return np.array(self._model_to_fit(**self._mw_kwargs))
+            return self.fast_model(params)
         except Exception as e:
             err = "\n\nThe wrapped model threw an error (see trace).\n\n"
             raise RuntimeError(err) from e
@@ -343,6 +341,10 @@ class ModelWrapper:
         # Update kwargs
         for i in range(len(params)):
             self._mw_kwargs[self._unfixed_param_names[i]] = params[i]
+
+        # Update linked parameters
+        for k in self._linked_params:
+            self._mw_kwargs[k] = self._mw_kwargs[self._linked_params[k]]
         
         return np.array(self._model_to_fit(**self._mw_kwargs))
 

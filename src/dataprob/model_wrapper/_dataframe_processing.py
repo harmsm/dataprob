@@ -250,6 +250,9 @@ def _check_and_update_parent(param_df):
     nan_mask = param_df["parent"] == "nan"
     param_df.loc[nan_mask,"parent"] = pd.NA
 
+    nan_mask = param_df["parent"] == "None"
+    param_df.loc[nan_mask,"parent"] = pd.NA
+
     # Remove self parents. For example, if the parameter is named "K" and the
     # parent is set to "K", the parameter parent is set to self. This allows us
     # to make sure at least one parameter is not linked. 
@@ -304,7 +307,7 @@ def _check_and_update_parent(param_df):
     for idx in param_df.index:
         parent = param_df.loc[idx,"parent"]
         if not pd.isna(parent):
-            row = np.array(param_df.loc[param_df["name"] == parent,columns_to_copy])
+            row = np.array(param_df.loc[param_df["name"] == parent,columns_to_copy])[0]
             param_df.loc[idx,columns_to_copy] = row
 
     return param_df

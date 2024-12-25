@@ -162,22 +162,20 @@ class VectorModelWrapper(ModelWrapper):
                                             param_in_order=self._fit_params_in_order,
                                             default_guess=self._default_guess)
         
-        # Get currently un-fixed parameters
-        self._unfixed_mask = np.array(np.logical_not(self._param_df["fixed"]),dtype=bool)
-        self._unfixed_param_names = np.array(self._param_df.loc[self._unfixed_mask,"name"]).copy()
         
-        # Look for linked parameters
-        linked_param_mask = np.logical_not(pd.isnull(self._param_df.loc[:,"parent"]))
-        if np.sum(linked_param_mask) > 0:
+        self._update_special_params()
 
-            param_links = list(self._param_df.loc[linked_param_mask,"parent"])
+        # Look for linked parameters
+        if np.sum(self._linked_mask) > 0:
+
+            param_links = list(self._param_df.loc[self._linked_mask,"parent"])
 
             final_links = []
             params_as_list = list(self._param_df["name"])
             for link in param_links:
                 final_links.append(params_as_list.index(link))
             
-            self._linked_all_mask = np.array(linked_param_mask,dtype=bool)
+            self._linked_all_mask = np.array(self._linked_mask,dtype=bool)
             self._linked_param_mapper = np.array(final_links,dtype=int)
 
         else:
@@ -221,15 +219,15 @@ class VectorModelWrapper(ModelWrapper):
 
         # Copy in only unfixed params from full vector sent in
         if len(params) == len(compiled_params):
-            compiled_params[self._unfixed_mask] = params[self._unfixed_mask]
+            compiled_params[self._floating_mask] = params[self._floating_mask]
 
         # Copy in all params into unfixed positions
-        elif len(params) == np.sum(self._unfixed_mask):
-            compiled_params[self._unfixed_mask] = params
+        elif len(params) == np.sum(self._floating_mask):
+            compiled_params[self._floating_mask] = params
         else:
             err = f"params length ({len(params)}) must either correspond to\n"
             err += f"the total number of parameters ({len(self._param_df)})\n"
-            err += f"or the number of unfixed parameters ({np.sum(self._unfixed_mask)}).\n"
+            err += f"or the number of unfixed parameters ({np.sum(self._floating_mask)}).\n"
             raise ValueError(err)
 
         try:
@@ -246,7 +244,7 @@ class VectorModelWrapper(ModelWrapper):
         Parameters
         ----------
         params : numpy.ndarray
-            vector of unfixed parameter values
+            vector of floating parameter values
 
         Returns
         -------
@@ -258,6 +256,6 @@ class VectorModelWrapper(ModelWrapper):
         if len(self._linked_param_mapper) > 0:
             self._all_param_vector[self._linked_all_mask] = params[self._linked_param_mapper]
 
-        self._all_param_vector[self._unfixed_mask] = params
+        self._all_param_vector[self._floating_mask] = params
         return self._model_to_fit(self._all_param_vector,
                                   **self._non_fit_kwargs)

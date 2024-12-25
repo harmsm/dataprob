@@ -195,6 +195,28 @@ class ModelWrapper:
             
             raise ValueError(err)
 
+    def _update_special_params(self):
+        """
+        Deal with fixed and linked parameters.  
+        """
+
+        # look for linked parameters
+        self._linked_mask = np.logical_not(pd.isna(self._param_df.loc[:,"parent"]))
+        if np.sum(self._linked_mask) > 0:
+            param_names = list(self._param_df.loc[self._linked_mask,"name"])
+            param_links = list(self._param_df.loc[self._linked_mask,"parent"])
+            self._linked_params = dict(zip(param_names,param_links))
+        else:
+            self._linked_params = {}
+
+        self._fixed_mask = np.array(self._param_df.loc[:,"fixed"],dtype=bool)
+        
+        # Get currently un-fixed parameters (fixed or linked count as fixed)
+        self._floating_mask = np.logical_and(np.logical_not(self._fixed_mask),
+                                            np.logical_not(self._linked_mask))
+        self._floating_mask = np.array(self._floating_mask,dtype=bool)
+        self._floating_param_names = np.array(self._param_df.loc[self._floating_mask,"name"]).copy()
+
 
     def finalize_params(self):
         """
@@ -208,19 +230,8 @@ class ModelWrapper:
         self._param_df = validate_dataframe(param_df=self._param_df,
                                             param_in_order=self._fit_params_in_order,
                                             default_guess=self._default_guess)
-        
-        # Get currently un-fixed parameters
-        self._unfixed_mask = np.logical_not(self._param_df.loc[:,"fixed"])
-        self._unfixed_param_names = np.array(self._param_df.loc[self._unfixed_mask,"name"]).copy()
-
-        # look for linked parameters
-        linked_param_mask = np.logical_not(pd.isna(self._param_df.loc[:,"parent"]))
-        if np.sum(linked_param_mask) > 0:
-            param_names = list(self._param_df.loc[linked_param_mask,"name"])
-            param_links = list(self._param_df.loc[linked_param_mask,"parent"])
-            self._linked_params = zip(param_names,param_links)
-        else:
-            self._linked_params = {}
+                
+        self._update_special_params()
 
         # Build a dictionary of keyword arguments to pass to the model when
         # called. 
@@ -306,12 +317,12 @@ class ModelWrapper:
         # If this is as long as all_fit parameters, pull out only the fit 
         # parameters we care about. 
         if len(params) == len(all_params):
-            params = params[self._unfixed_mask]
+            params = params[self._floating_mask]
         
-        if len(params) != np.sum(self._unfixed_mask):
+        if len(params) != np.sum(self._floating_mask):
             err = f"params length ({len(params)}) must either correspond to\n"
             err += f"the total number of parameters ({len(self._param_df)})\n"
-            err += f"or the number of unfixed parameters ({np.sum(self._unfixed_mask)}).\n"
+            err += f"or the number of unfixed parameters ({np.sum(self._floating_mask)}).\n"
             raise ValueError(err)
 
         # Run underlying fast model
@@ -340,7 +351,7 @@ class ModelWrapper:
 
         # Update kwargs
         for i in range(len(params)):
-            self._mw_kwargs[self._unfixed_param_names[i]] = params[i]
+            self._mw_kwargs[self._floating_param_names[i]] = params[i]
 
         # Update linked parameters
         for k in self._linked_params:
@@ -384,6 +395,9 @@ class ModelWrapper:
         +---------------+-----------------------------------------------------+
         | 'prior_std'   | single float value; np.nan allowed (see below)      |
         +---------------+-----------------------------------------------------+
+        | 'parent'      | string parameter name pointing to the parameter to  | 
+        |               | link this parameter to.                             |
+        +---------------+-----------------------------------------------------+
 
         Gaussian priors are specified using the 'prior_mean' and 'prior_std' 
         fields, declaring the prior mean and standard deviation. If both are
@@ -406,18 +420,56 @@ class ModelWrapper:
     def non_fit_kwargs(self):
         """
         A dictionary with the function keyword arguments that are not fit 
-        paramters. 
+        parameters. 
         """
 
         return self._non_fit_kwargs
     
     @property
-    def unfixed_mask(self):
+    def floating_mask(self):
         """
-        Mask for param_df that returns only floating (unfixed) parameters.
+        Mask for param_df that returns only floating parameters. (Not fixed, 
+        not linked to a parent).
         """
 
-        return self._unfixed_mask
+        if hasattr(self,"_floating_mask"):
+            return self._floating_mask
+    
+        return None
+
+    @property
+    def fixed_mask(self):
+        """
+        Mask for param_df that returns only fixed parameters.
+        """
+
+        if hasattr(self,"_fixed_mask"):
+            return self._fixed_mask
+    
+        return None
+
+    @property
+    def linked_mask(self):
+        """
+        Mask for param_df that returns only linked parameters (those with a 
+        parent specified).
+        """
+
+        if hasattr(self,"_linked_mask"):
+            return self._linked_mask
+
+        return None
+    
+    @property
+    def linked_param_dict(self):
+        """
+        Dictionary keying linked parameters to their parents. 
+        """
+
+        if hasattr(self,"_linked_parmas"):
+            return self._linked_params
+
+        return None
         
     def __repr__(self):
         """

@@ -356,8 +356,8 @@ def test_ModelWrapper_finalize_params():
     assert mw._mw_kwargs["c"] == 3
     assert mw._mw_kwargs["d"] == "test"
     assert mw._mw_kwargs["e"] == 3
-    assert np.array_equal(mw._unfixed_mask,[True,True,True])
-    assert np.array_equal(mw._unfixed_param_names,["a","b","c"])
+    assert np.array_equal(mw._floating_mask,[True,True,True])
+    assert np.array_equal(mw._floating_param_names,["a","b","c"])
 
     # Run function
     mw.finalize_params()
@@ -373,8 +373,8 @@ def test_ModelWrapper_finalize_params():
     assert mw._mw_kwargs["c"] == 3
     assert mw._mw_kwargs["d"] == "test"
     assert mw._mw_kwargs["e"] == 3
-    assert np.array_equal(mw._unfixed_mask,[False,True,True])
-    assert np.array_equal(mw._unfixed_param_names,["b","c"])
+    assert np.array_equal(mw._floating_mask,[False,True,True])
+    assert np.array_equal(mw._floating_param_names,["b","c"])
     
     # send in bad edit -- finalize should catch
     mw.param_df.loc["not_a_param","guess"] = 5
@@ -397,6 +397,20 @@ def test_ModelWrapper_finalize_params():
     # remove offending parameter
     mw.non_fit_kwargs.pop("f")
     mw.finalize_params()
+
+    # now check addition of linked parameters
+    def model_to_test_wrap(a=1,b=2,c=3): return a*b*c
+    mw = ModelWrapper(model_to_test_wrap)
+    mw.param_df["parent"] = [None,"a","a"]
+    mw.finalize_params()
+    assert len(mw._linked_params) == 2
+    assert mw._linked_params["b"] == "a"
+    assert mw._linked_params["c"] == "a"
+
+    mw.param_df["parent"] = [None,None,None]
+    mw.finalize_params()
+    assert len(mw._linked_params) == 0
+
     
 
 def test_ModelWrapper_update_params(spreadsheets):
@@ -562,17 +576,17 @@ def test_ModelWrapper_non_fit_kwargs():
     assert mw.non_fit_kwargs["d"] == "test"
     assert mw.non_fit_kwargs["e"] == 3
 
-def test_ModelWrapper_unfixed_mask():
+def test_ModelWrapper_floating_mask():
     
     def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
     mw = ModelWrapper(model_to_test_wrap)
-    assert np.array_equal(mw.unfixed_mask,[True,True,True])
+    assert np.array_equal(mw.floating_mask,[True,True,True])
     
     # set to fixed -- should not update until finalized
     mw.param_df.loc["a","fixed"] = True
-    assert np.array_equal(mw.unfixed_mask,[True,True,True])
+    assert np.array_equal(mw.floating_mask,[True,True,True])
     mw.finalize_params()
-    assert np.array_equal(mw.unfixed_mask,[False,True,True])
+    assert np.array_equal(mw.floating_mask,[False,True,True])
 
 
 def test_ModelWrapper___repr__():

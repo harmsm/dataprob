@@ -174,7 +174,7 @@ def test_VectorModelWrapper__finalize_params():
     # Check initial configuration after __init__
     assert np.array_equal(mw._fit_params_in_order,["x","y"])
     assert mw._param_df.loc["x","guess"] == 1
-    assert np.array_equal(mw._unfixed_mask,[True,True])
+    assert np.array_equal(mw._floating_mask,[True,True])
     assert len(mw._non_fit_kwargs) == 2
     assert mw._non_fit_kwargs["b"] is None
     assert mw._non_fit_kwargs["c"] == 3
@@ -185,7 +185,7 @@ def test_VectorModelWrapper__finalize_params():
 
     assert np.array_equal(mw._fit_params_in_order,["x","y"])
     assert mw._param_df.loc["x","guess"] == 10
-    assert np.array_equal(mw._unfixed_mask,[True,True])
+    assert np.array_equal(mw._floating_mask,[True,True])
     assert len(mw._non_fit_kwargs) == 2
     assert mw._non_fit_kwargs["b"] is None
     assert mw._non_fit_kwargs["c"] == 3
@@ -196,7 +196,7 @@ def test_VectorModelWrapper__finalize_params():
     # Check for expected output
     assert np.array_equal(mw._fit_params_in_order,["x","y"])
     assert mw._param_df.loc["x","guess"] == 10
-    assert np.array_equal(mw._unfixed_mask,[False,True])
+    assert np.array_equal(mw._floating_mask,[False,True])
     assert len(mw._non_fit_kwargs) == 2
     assert mw._non_fit_kwargs["b"] is None
     assert mw._non_fit_kwargs["c"] == 3

@@ -250,11 +250,11 @@ def test_VectorModelWrapper_model():
     result = mw.model(params=None)
     assert result == 20 + 30 + 50
 
-    # Guesses override what we sent in 
+    # Guesses *do not* override what we sent in 
     mw.param_df.loc["a","fixed"] = True
     mw.param_df.loc["b","fixed"] = True
     result = mw.model(params=[1,2,3])
-    assert result == 20 + 30 + 3
+    assert result == 1 + 2 + 3
 
     # Should give fixed values for a and b plus what we sent in for c
     result = mw.model(params=[1000])
@@ -265,7 +265,7 @@ def test_VectorModelWrapper_model():
 
     # make sure it recognizes fix and guess
     assert mw.model([1000]) == 10 + 30 + 1000
-    assert mw.model([1,2,1000]) == 10 + 30 + 1000
+    assert mw.model([1,2,1000]) == 1 + 2 + 1000
 
     # Test error catching from model
     def test_fcn(x,z="test"): raise TypeError

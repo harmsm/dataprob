@@ -142,7 +142,7 @@ class BootstrapFitter(Fitter):
         if self._success:
             self._update_fit_df()
 
-    def _update_fit_df(self):
+    def _get_fit_values(self):
         """
         Recalculate the parameter estimates from any new samples.
         """
@@ -176,7 +176,7 @@ class BootstrapFitter(Fitter):
             low_95.append(sorted_samples[lower])
             high_95.append(sorted_samples[upper])
 
-        self._record_fit_values(estimate,std,low_95,high_95)
+        return estimate, std, low_95, high_95
 
     
     @property

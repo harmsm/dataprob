@@ -166,22 +166,17 @@ class VectorModelWrapper(ModelWrapper):
         self._update_special_params()
 
         # Look for linked parameters
-        if np.sum(self._linked_mask) > 0:
-
-            param_links = list(self._param_df.loc[self._linked_mask,"parent"])
-
-            final_links = []
-            params_as_list = list(self._param_df["name"])
-            for link in param_links:
-                final_links.append(params_as_list.index(link))
-            
-            self._linked_all_mask = np.array(self._linked_mask,dtype=bool)
-            self._linked_param_mapper = np.array(final_links,dtype=int)
-
+        if np.sum(self._linked_mask) == 0:
+            self._linked_mapper = np.array([],dtype=int)
+        
         else:
-            self._linked_all_mask = np.zeros(len(self._param_df),dtype=bool)
-            self._linked_param_mapper = np.array([],dtype=int)
 
+            linked_mapper = []
+            params_as_list = list(self._param_df["name"])
+            for link in self._param_df.loc[self._linked_mask,"parent"]:
+                linked_mapper.append(params_as_list.index(link))
+
+            self._linked_mapper = np.array(linked_mapper,dtype=int)
 
         # Create all param vector
         self._all_param_vector = np.array(self._param_df["guess"],dtype=float).copy()
@@ -209,33 +204,36 @@ class VectorModelWrapper(ModelWrapper):
         # user has fixed value or made a change that has not propagated properly
         self.finalize_params()
 
-        compiled_params = np.array(self._param_df["guess"],dtype=float).copy()
-
         if params is None:
-            params = compiled_params
+            params = np.array(self._param_df.loc[self._floating_mask,"guess"]).copy()
 
         # make sure the params are a float array
         params = np.array(params,dtype=float)
+        self._num_fittable = len(self._param_df)
 
-        # Copy in only unfixed params from full vector sent in
-        if len(params) == len(compiled_params):
-            compiled_params[self._floating_mask] = params[self._floating_mask]
+        if len(params) == self._num_fittable:
 
-        # Copy in all params into unfixed positions
-        elif len(params) == np.sum(self._floating_mask):
-            compiled_params[self._floating_mask] = params
-        else:
-            err = f"params length ({len(params)}) must either correspond to\n"
-            err += f"the total number of parameters ({len(self._param_df)})\n"
-            err += f"or the number of unfixed parameters ({np.sum(self._floating_mask)}).\n"
-            raise ValueError(err)
+            try:
+                return self._model_to_fit(params,
+                                          **self._non_fit_kwargs)
+            except Exception as e:
+                err = "\n\nThe wrapped model threw an error (see trace).\n\n"
+                raise RuntimeError(err) from e
+            
+        if len(params) == self._num_floating:
 
-        try:
-            return self._model_to_fit(compiled_params,
-                                      **self._non_fit_kwargs)
-        except Exception as e:
-            err = "\n\nThe wrapped model threw an error (see trace).\n\n"
-            raise RuntimeError(err) from e
+            try:
+                return self.fast_model(params)
+            except Exception as e:
+                err = "\n\nThe wrapped model threw an error (see trace).\n\n"
+                raise RuntimeError(err) from e
+
+        err = f"params length ({len(params)}) must either correspond to\n"
+        err += f"the total number of parameters ({len(self._param_df)})\n"
+        err += f"or the number of unfixed parameters ({np.sum(self._floating_mask)}).\n"
+        raise ValueError(err)
+
+
     
     def fast_model(self,params):
         """
@@ -253,8 +251,8 @@ class VectorModelWrapper(ModelWrapper):
         """
 
         # Map linked parameters if any are specified
-        if len(self._linked_param_mapper) > 0:
-            self._all_param_vector[self._linked_all_mask] = params[self._linked_param_mapper]
+        if len(self._linked_mapper) > 0:
+            self._all_param_vector[self._linked_mask] = params[self._linked_mapper]
 
         self._all_param_vector[self._floating_mask] = params
         return self._model_to_fit(self._all_param_vector,

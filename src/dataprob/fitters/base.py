@@ -134,33 +134,7 @@ class Fitter:
         else:
             pass
 
-    def _record_fit_values(self,estimate,std,low_95,high_95):
 
-        # Get finalized parameters from param_df in case they were updated 
-        # after the model was set and the fit_df created. 
-        for col in ["guess","fixed","lower_bound","upper_bound","prior_mean",
-                    "prior_std","parent"]:
-            self._fit_df[col] = self.param_df[col]
-
-        # Copy floating (fit) parameters in
-        floating_mask = self._model.floating_mask
-        self._fit_df.loc[floating_mask,"estimate"] = estimate
-        self._fit_df.loc[floating_mask,"std"] = std
-        self._fit_df.loc[floating_mask,"low_95"] = low_95
-        self._fit_df.loc[floating_mask,"high_95"] = high_95
-
-        # Copy linked parameter values over
-        linked_param_dict = self._model.linked_param_dict
-        if linked_param_dict is not None:
-            map_to = list(linked_param_dict.keys())
-            map_from = list(linked_param_dict.values())
-            columns = ["estimate","std","low_95","high_95"]
-            self._fit_df.loc[map_to,columns] = self._fit_df.loc[map_from,columns]   
-
-        # Copy fixed values in (just guess; rest nan)
-        fixed_mask = self._model.fixed_mask
-        self._fit_df.loc[fixed_mask,"estimate"] = self._fit_df.loc[fixed_mask,"guess"]
-                
     def fit(self,
             y_obs=None,
             y_std=None,
@@ -504,13 +478,48 @@ class Fitter:
 
         self._fit_df = df
 
-    def _update_fit_df(self):
+    def _get_fit_values(self):
         """
-        Should be redefined in subclass. This function should update 
-        self._fit_df. 
         """
 
-        raise NotImplementedError("should be implemented in subclass\n")
+        raise NotImplementedError("Should be implemented in subclass")
+
+
+    def _update_fit_df(self):
+        """
+        Update the fit dataframe with the fit results. 
+        """
+        
+        estimate, std, low_95, high_95 = self._get_fit_values()
+
+        # Get finalized parameters from param_df in case they were updated 
+        # after the model was set and the fit_df created. 
+        for col in ["guess","fixed","lower_bound","upper_bound","prior_mean",
+                    "prior_std","parent"]:
+            self._fit_df[col] = self.param_df[col]
+
+        # Copy floating (fit) parameters in
+        floating_mask = self._model.floating_mask
+        self._fit_df.loc[floating_mask,"estimate"] = estimate
+        self._fit_df.loc[floating_mask,"std"] = std
+        self._fit_df.loc[floating_mask,"low_95"] = low_95
+        self._fit_df.loc[floating_mask,"high_95"] = high_95
+
+        # Copy linked parameter values over
+        linked_param_dict = self._model.linked_param_dict
+        if linked_param_dict is not None:
+            map_to = list(linked_param_dict.keys())
+            map_from = list(linked_param_dict.values())
+            columns = ["estimate","std","low_95","high_95"]
+            
+            new_values = np.array(self._fit_df.loc[map_from,columns],
+                                  dtype=float)
+            self._fit_df.loc[map_to,columns] = new_values
+
+        # Copy fixed values in (just guess; rest nan)
+        fixed_mask = self._model.fixed_mask
+        self._fit_df.loc[fixed_mask,"estimate"] = self._fit_df.loc[fixed_mask,"guess"]
+
 
     @property
     def fit_df(self):

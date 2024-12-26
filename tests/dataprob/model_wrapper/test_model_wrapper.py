@@ -323,6 +323,49 @@ def test_ModelWrapper__validate_non_fit_kwargs():
     with pytest.raises(ValueError):
         mw._validate_non_fit_kwargs()
 
+def test_ModelWrapper__update_special_params():
+
+    def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
+    mw = ModelWrapper(model_to_test_wrap)
+
+    assert np.array_equal(mw.fixed_mask,[False,False,False])
+    assert np.array_equal(mw.linked_mask,[False,False,False])
+    assert np.array_equal(mw.floating_mask,[True,True,True])
+    assert len(mw.linked_param_dict) == 0
+    assert issubclass(type(mw.linked_param_dict),dict)
+
+    mw._param_df["fixed"] = [True,False,False]
+    mw._update_special_params()
+
+    assert np.array_equal(mw.fixed_mask,[True,False,False])
+    assert np.array_equal(mw.linked_mask,[False,False,False])
+    assert np.array_equal(mw.floating_mask,[False,True,True])
+    assert len(mw.linked_param_dict) == 0
+    assert issubclass(type(mw.linked_param_dict),dict)
+
+    mw._param_df["parent"] = [pd.NA,pd.NA,"a"]
+    mw._update_special_params()
+
+    assert np.array_equal(mw.fixed_mask,[True,False,False])
+    assert np.array_equal(mw.linked_mask,[False,False,True])
+    assert np.array_equal(mw.floating_mask,[False,True,False])
+
+    assert len(mw.linked_param_dict) == 1
+    assert issubclass(type(mw.linked_param_dict),dict)
+    assert mw.linked_param_dict["c"] == "a"
+
+    mw._param_df["fixed"] = [False,False,False]
+    mw._param_df["parent"] = [pd.NA,pd.NA,pd.NA]
+    mw._update_special_params()
+
+    assert np.array_equal(mw.fixed_mask,[False,False,False])
+    assert np.array_equal(mw.linked_mask,[False,False,False])
+    assert np.array_equal(mw.floating_mask,[True,True,True])
+    
+    assert len(mw.linked_param_dict) == 0
+    assert issubclass(type(mw.linked_param_dict),dict)
+
+
 
 def test_ModelWrapper_finalize_params():
 
@@ -375,6 +418,8 @@ def test_ModelWrapper_finalize_params():
     assert mw._mw_kwargs["e"] == 3
     assert np.array_equal(mw._floating_mask,[False,True,True])
     assert np.array_equal(mw._floating_param_names,["b","c"])
+    assert np.array_equal(mw._fixed_mask,[True,False,False])
+    assert np.array_equal(mw._linked_mask,[False,False,False])
     
     # send in bad edit -- finalize should catch
     mw.param_df.loc["not_a_param","guess"] = 5
@@ -403,13 +448,13 @@ def test_ModelWrapper_finalize_params():
     mw = ModelWrapper(model_to_test_wrap)
     mw.param_df["parent"] = [None,"a","a"]
     mw.finalize_params()
-    assert len(mw._linked_params) == 2
-    assert mw._linked_params["b"] == "a"
-    assert mw._linked_params["c"] == "a"
+    assert len(mw._linked_param_dict) == 2
+    assert mw._linked_param_dict["b"] == "a"
+    assert mw._linked_param_dict["c"] == "a"
 
     mw.param_df["parent"] = [None,None,None]
     mw.finalize_params()
-    assert len(mw._linked_params) == 0
+    assert len(mw._linked_param_dict) == 0
 
     
 
@@ -568,6 +613,25 @@ def test_ModelWrapper_param_df():
     assert np.array_equal(mw.param_df["name"],["a","b","c"])    
     assert np.array_equal(mw.param_df["guess"],[10,20,30])
 
+def test_ModelWrapper_num_fittable():
+
+    def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
+    mw = ModelWrapper(model_to_test_wrap)
+    assert mw.num_fittable == 3
+    mw.param_df.loc["a","fixed"] = True
+    mw.finalize_params()
+    assert mw.num_fittable == 3
+
+
+def test_ModelWrapper_num_floating():
+
+    def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
+    mw = ModelWrapper(model_to_test_wrap)
+    assert mw.num_floating == 3
+    mw.param_df.loc["a","fixed"] = True
+    mw.finalize_params()
+    assert mw.num_floating == 2
+
 def test_ModelWrapper_non_fit_kwargs():
 
     def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
@@ -587,6 +651,46 @@ def test_ModelWrapper_floating_mask():
     assert np.array_equal(mw.floating_mask,[True,True,True])
     mw.finalize_params()
     assert np.array_equal(mw.floating_mask,[False,True,True])
+
+
+def test_ModelWrapper_fixed_mask():
+
+    def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
+    mw = ModelWrapper(model_to_test_wrap)
+    assert np.array_equal(mw.fixed_mask,[False,False,False])
+
+    mw.param_df["fixed"] = [False,True,True]
+    mw.finalize_params()
+    assert np.array_equal(mw.fixed_mask,[False,True,True])
+
+
+def test_ModelWrapper_linked_mask():
+
+    def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
+    mw = ModelWrapper(model_to_test_wrap)
+    assert np.array_equal(mw.linked_mask,[False,False,False])
+
+    mw.param_df["parent"] = [pd.NA,"a","a"]
+    mw.finalize_params()
+    assert np.array_equal(mw.linked_mask,[False,True,True])
+
+
+def test_ModelWrapper_linked_param_dict():
+
+    def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
+    mw = ModelWrapper(model_to_test_wrap)
+    assert issubclass(type(mw.linked_param_dict),dict)
+    assert len(mw.linked_param_dict) == 0
+
+    mw.param_df["parent"] = [pd.NA,"a","a"]
+    mw.finalize_params()
+    assert len(mw.linked_param_dict) == 2
+    mw.linked_param_dict["b"] == "a"
+    mw.linked_param_dict["c"] == "a"
+
+
+
+
 
 
 def test_ModelWrapper___repr__():

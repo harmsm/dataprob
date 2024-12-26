@@ -166,7 +166,7 @@ class ModelWrapper:
         # make sure the user does not add or remove a key with the setter. 
         self._non_fit_kwargs_keys = set(self._non_fit_kwargs_keys)
 
-        # Finalize -- read to run the model
+        # Finalize -- ready to run the model
         self.finalize_params()
 
     def _validate_non_fit_kwargs(self):
@@ -205,9 +205,9 @@ class ModelWrapper:
         if np.sum(self._linked_mask) > 0:
             param_names = list(self._param_df.loc[self._linked_mask,"name"])
             param_links = list(self._param_df.loc[self._linked_mask,"parent"])
-            self._linked_params = dict(zip(param_names,param_links))
+            self._linked_param_dict = dict(zip(param_names,param_links))
         else:
-            self._linked_params = {}
+            self._linked_param_dict = {}
 
         self._fixed_mask = np.array(self._param_df.loc[:,"fixed"],dtype=bool)
         
@@ -216,6 +216,7 @@ class ModelWrapper:
                                             np.logical_not(self._linked_mask))
         self._floating_mask = np.array(self._floating_mask,dtype=bool)
         self._floating_param_names = np.array(self._param_df.loc[self._floating_mask,"name"]).copy()
+        self._num_floating = len(self._floating_param_names)
 
 
     def finalize_params(self):
@@ -230,6 +231,7 @@ class ModelWrapper:
         self._param_df = validate_dataframe(param_df=self._param_df,
                                             param_in_order=self._fit_params_in_order,
                                             default_guess=self._default_guess)
+        self._num_fittable = len(self._param_df)
                 
         self._update_special_params()
 
@@ -288,10 +290,9 @@ class ModelWrapper:
     def model(self,params=None):
         """
         Model observable. This function takes a numpy array either the number of 
-        unfixed parameters long OR the total number of parameters long. If 
-        parameters are fixed, their values in a params array with all fit 
-        parameters are *ignored* and the fixed parameter guesses are used 
-        instead. 
+        unfixed and unlinked parameters long OR the total number of parameters
+        long. If params is as long as the total number of parameters, these 
+        override 
 
         Parameters
         ----------
@@ -304,39 +305,51 @@ class ModelWrapper:
         # user has fixed value or made a change that has not propagated properly
         self.finalize_params()
 
-        # Create all param vector
-        all_params = np.array(self._param_df["guess"],dtype=float).copy()
-
-        # no parameters specified, get all guesses
         if params is None:
-            params = all_params
+            params = np.array(self._param_df.loc[self._floating_mask,"guess"]).copy()
 
         # make sure the params array is a float array
         params = np.array(params,dtype=float)
 
-        # If this is as long as all_fit parameters, pull out only the fit 
-        # parameters we care about. 
-        if len(params) == len(all_params):
-            params = params[self._floating_mask]
+        if len(params) == self._num_fittable:
+
+            mw_kwargs = {}
+            keys = list(self._mw_kwargs.keys())
+
+            for i, k in enumerate(self._fit_params_in_order):
+                mw_kwargs[k] = params[i]
+                keys.remove(k)
+
+            for k in keys:
+                mw_kwargs[k] = self._mw_kwargs[k]
+
+            try:
+                return self._model_to_fit(**mw_kwargs)
+            except Exception as e:
+                err = "\n\nThe wrapped model threw an error (see trace).\n\n"
+                raise RuntimeError(err) from e
+            
+        if len(params) == self._num_floating:
+            
+            try:
+                return self.fast_model(params)
+            except Exception as e:
+                err = "\n\nThe wrapped model threw an error (see trace).\n\n"
+                raise RuntimeError(err) from e
         
-        if len(params) != np.sum(self._floating_mask):
-            err = f"params length ({len(params)}) must either correspond to\n"
-            err += f"the total number of parameters ({len(self._param_df)})\n"
-            err += f"or the number of unfixed parameters ({np.sum(self._floating_mask)}).\n"
-            raise ValueError(err)
 
-        # Run underlying fast model
-        try:
-            return self.fast_model(params)
-        except Exception as e:
-            err = "\n\nThe wrapped model threw an error (see trace).\n\n"
-            raise RuntimeError(err) from e
+        # If we get here, the number of parameters was not interpretable. 
+        err = f"params length ({len(params)}) must either correspond to\n"
+        err += f"the total number of parameters ({len(self._param_df)})\n"
+        err += f"or the number of unfixed parameters ({np.sum(self._floating_mask)}).\n"
+        raise ValueError(err)
 
-
+        
     def fast_model(self,params):
         """
         Calculate model result with minimal error checking. params *must* be
-        an array the same length as the number of unfixed parameters. 
+        an array the same length as the number of unfixed parameters. This 
+        assumes that self.finalize_params() was already run. 
 
         Parameters
         ----------
@@ -354,8 +367,8 @@ class ModelWrapper:
             self._mw_kwargs[self._floating_param_names[i]] = params[i]
 
         # Update linked parameters
-        for k in self._linked_params:
-            self._mw_kwargs[k] = self._mw_kwargs[self._linked_params[k]]
+        for k in self._linked_param_dict:
+            self._mw_kwargs[k] = self._mw_kwargs[self._linked_param_dict[k]]
         
         return np.array(self._model_to_fit(**self._mw_kwargs))
 
@@ -417,6 +430,16 @@ class ModelWrapper:
                                             param_in_order=self._fit_params_in_order)
         
     @property
+    def num_fittable(self):
+        
+        return self._num_fittable
+    
+    @property
+    def num_floating(self):
+
+        return self._num_floating
+
+    @property
     def non_fit_kwargs(self):
         """
         A dictionary with the function keyword arguments that are not fit 
@@ -466,10 +489,10 @@ class ModelWrapper:
         Dictionary keying linked parameters to their parents. 
         """
 
-        if hasattr(self,"_linked_parmas"):
-            return self._linked_params
+        if hasattr(self,"_linked_param_dict"):
+            return self._linked_param_dict
 
-        return None
+        return {}
         
     def __repr__(self):
         """

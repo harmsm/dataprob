@@ -447,7 +447,7 @@ class BayesianSampler(Fitter):
 
         self._update_fit_df()
 
-    def _update_fit_df(self):
+    def _get_fit_values(self):
         """
         Update samples based on the samples array.
         """
@@ -473,7 +473,7 @@ class BayesianSampler(Fitter):
             low_95.append(sorted_samples[lower])
             high_95.append(sorted_samples[upper])
 
-        self._record_fit_values(estimate,std,low_95,high_95)
+        return estimate, std, low_95, high_95
 
     
     @property

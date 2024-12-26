@@ -561,6 +561,15 @@ def test_ModelWrapper_model():
     mw = ModelWrapper(model_to_test_wrap)
     with pytest.raises(RuntimeError):
         mw.model()
+
+    # edge cas where we send in number floating parameters and it dies
+    def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): raise ValueError
+    mw = ModelWrapper(model_to_test_wrap)
+    mw.param_df["fixed"] = [True,False,False]
+    with pytest.raises(RuntimeError):
+        mw.model([2,3])
+
+
     
 def test_ModelWrapper_fast_model():
 
@@ -652,6 +661,12 @@ def test_ModelWrapper_floating_mask():
     mw.finalize_params()
     assert np.array_equal(mw.floating_mask,[False,True,True])
 
+    # test None fallback
+    def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
+    mw = ModelWrapper(model_to_test_wrap)
+    del(mw._floating_mask)
+    assert mw.floating_mask is None
+
 
 def test_ModelWrapper_fixed_mask():
 
@@ -663,6 +678,13 @@ def test_ModelWrapper_fixed_mask():
     mw.finalize_params()
     assert np.array_equal(mw.fixed_mask,[False,True,True])
 
+    # test None fallback
+    def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
+    mw = ModelWrapper(model_to_test_wrap)
+    del(mw._fixed_mask)
+    assert mw.fixed_mask is None
+
+
 
 def test_ModelWrapper_linked_mask():
 
@@ -673,6 +695,12 @@ def test_ModelWrapper_linked_mask():
     mw.param_df["parent"] = [pd.NA,"a","a"]
     mw.finalize_params()
     assert np.array_equal(mw.linked_mask,[False,True,True])
+
+    # test None fallback
+    def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
+    mw = ModelWrapper(model_to_test_wrap)
+    del(mw._linked_mask)
+    assert mw.linked_mask is None
 
 
 def test_ModelWrapper_linked_param_dict():
@@ -688,9 +716,11 @@ def test_ModelWrapper_linked_param_dict():
     mw.linked_param_dict["b"] == "a"
     mw.linked_param_dict["c"] == "a"
 
-
-
-
+    # test {} fallback
+    def model_to_test_wrap(a=1,b=2,c=3,d="test",e=3): return a*b*c
+    mw = ModelWrapper(model_to_test_wrap)
+    del(mw._linked_param_dict)
+    assert len(mw.linked_param_dict) == 0
 
 
 def test_ModelWrapper___repr__():

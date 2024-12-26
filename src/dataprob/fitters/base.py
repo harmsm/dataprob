@@ -506,14 +506,14 @@ class Fitter:
         self._fit_df.loc[floating_mask,"high_95"] = high_95
 
         # Copy linked parameter values over
-        linked_param_dict = self._model.linked_param_dict
-        if linked_param_dict is not None:
-            map_to = list(linked_param_dict.keys())
-            map_from = list(linked_param_dict.values())
+        if len(self._model.linked_param_dict) > 0:
+            
+            map_to = list(self._model.linked_param_dict.keys())
+            map_from = list(self._model.linked_param_dict.values())
             columns = ["estimate","std","low_95","high_95"]
             
             new_values = np.array(self._fit_df.loc[map_from,columns],
-                                  dtype=float)
+                                    dtype=float)
             self._fit_df.loc[map_to,columns] = new_values
 
         # Copy fixed values in (just guess; rest nan)

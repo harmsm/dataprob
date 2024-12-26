@@ -109,11 +109,7 @@ def _build_columns(param_df,default_guess):
     str_columns = ["parent"]
     for sc in str_columns:
 
-        try:
-            param_df[sc] = param_df[sc].astype(str)
-        except Exception as e:
-            err = f"Could not coerce all entries in the '{sc}' column to str\n"
-            raise ValueError(err) from e
+        param_df[sc] = param_df[sc].astype(str)
         
         na_mask = param_df[sc] == "<NA>"
         param_df.loc[na_mask,"parent"] = pd.NA
@@ -278,7 +274,9 @@ def _check_and_update_parent(param_df):
 
         raise ValueError(err)
     
-    # Make sure that there are no double-nested parameters
+    # Make sure that there are no double-nested parameters. This also makes sure
+    # there is at least one non-parent, as there is no way to get all defined 
+    # with parents without a double-nest. 
     has_a_parent = set(param_df.loc[defined_mask,"name"])
     is_a_parent = set(param_df["name"][param_df["name"].isin(param_df["parent"])])
     has_and_is_a_parent = has_a_parent.intersection(is_a_parent)
@@ -291,13 +289,6 @@ def _check_and_update_parent(param_df):
         err += f"\n{repr(has_and_is_a_parent)}\n\n"
 
         raise ValueError(err)
-
-    # Make sure that there is at least one non-parent to avoid a scenario of all
-    # children, no parents
-    if np.sum(pd.isna(param_df["parent"])) == 0:
-        err = "\nat least one of the parameters must not have a parent\n\n"
-        raise ValueError(err)
-
 
     columns_to_copy = list(param_df.columns)
     columns_to_copy.remove("name")

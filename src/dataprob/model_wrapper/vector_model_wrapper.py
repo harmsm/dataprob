@@ -161,7 +161,7 @@ class VectorModelWrapper(ModelWrapper):
         self._param_df = validate_dataframe(param_df=self._param_df,
                                             param_in_order=self._fit_params_in_order,
                                             default_guess=self._default_guess)
-        
+        self._num_fittable = len(self._param_df)
         
         self._update_special_params()
 
@@ -233,7 +233,6 @@ class VectorModelWrapper(ModelWrapper):
         err += f"or the number of unfixed parameters ({np.sum(self._floating_mask)}).\n"
         raise ValueError(err)
 
-
     
     def fast_model(self,params):
         """
@@ -250,10 +249,11 @@ class VectorModelWrapper(ModelWrapper):
             result of model(params)
         """
 
+        self._all_param_vector[self._floating_mask] = params
+
         # Map linked parameters if any are specified
         if len(self._linked_mapper) > 0:
-            self._all_param_vector[self._linked_mask] = params[self._linked_mapper]
-
-        self._all_param_vector[self._floating_mask] = params
+            self._all_param_vector[self._linked_mask] = self._all_param_vector[self._linked_mapper]
+        
         return self._model_to_fit(self._all_param_vector,
                                   **self._non_fit_kwargs)

@@ -20,6 +20,15 @@ class MLFitter(Fitter):
     variance) 
     """
     
+    def __init__(self, some_function, **kwargs):
+        """
+        Initialize the MLFitter.
+        """
+        # Store a direct reference to the original model object/function passed by the user.
+        self._original_model_object = some_function
+        super().__init__(some_function, **kwargs)
+
+
     def fit(self,
             y_obs=None,
             y_std=None,
@@ -68,16 +77,46 @@ class MLFitter(Fitter):
         guesses = np.array(self._model.param_df.loc[to_fit,"guess"]).copy()
         bounds = np.array([self._model.param_df.loc[to_fit,"lower_bound"],
                            self._model.param_df.loc[to_fit,"upper_bound"]]).copy()
-        # Do the actual fit
-        def fn(*args): return -self._weighted_residuals(*args)
-        self._fit_result = optimize.least_squares(fn,
-                                                  x0=guesses,
-                                                  bounds=bounds,
-                                                  **kwargs)
-
-        self._success = self._fit_result.success
         
-        # Delete samples if they were present from a previous fit
+        # Do the actual fit
+        def fn(*args): return self._weighted_residuals(*args)
+        
+        fit_kwargs = kwargs.copy()
+
+        model_to_check = self._original_model_object
+        if hasattr(model_to_check, "__self__"):
+            model_to_check = model_to_check.__self__
+
+        if hasattr(model_to_check, "jacobian_normalized") and callable(model_to_check.jacobian_normalized):
+            print("INFO: Analytical Jacobian found in the model. Using for optimization.")
+            
+            def jac_wrapper(unfixed_params):
+                full_params = np.array(self.param_df["guess"], dtype=float)
+                full_params[to_fit] = unfixed_params
+                
+                J_unweighted = model_to_check.jacobian_normalized(full_params)
+                
+                y_std_norm = model_to_check.y_std_normalized
+                J_weighted = J_unweighted / y_std_norm[:, np.newaxis]
+
+                return J_weighted[:, to_fit]
+
+            fit_kwargs["jac"] = jac_wrapper
+        
+        try:
+            self._fit_result = optimize.least_squares(fn,
+                                                      x0=guesses,
+                                                      bounds=bounds,
+                                                      **fit_kwargs)
+            self._success = self._fit_result.success
+
+        except KeyboardInterrupt:
+            print("Fit interrupted by user. Capturing last state.")
+            if hasattr(self, "_fit_result"):
+                self._success = False
+            else:
+                raise
+
         if hasattr(self,"_samples"):
             del self._samples
     
@@ -88,36 +127,51 @@ class MLFitter(Fitter):
         Recalculate the parameter estimates from any new samples.
         """
         
+        if not hasattr(self, "_fit_result"):
+            return
+
         estimate = self._fit_result.x
 
-        # Extract standard error on the fit parameter from the covariance
-        N = len(self._y_obs)
+        N = len(self.y_obs)
         P = len(self._fit_result.x)
 
         try:
             J = self._fit_result.jac
-            cov = np.linalg.inv(2*np.dot(J.T,J))
+            
+            # The residuals are the final weighted residuals from the fit result
+            residuals = self._fit_result.fun
+            
+            # Degrees of freedom
+            dof = N - P
+            if dof <= 0:
+                raise ValueError("Degrees of freedom must be positive to calculate uncertainty.")
 
-            std = np.sqrt(np.diagonal(cov)) #variance
+            # Reduced Chi-Squared (variance of the weighted residuals)
+            reduced_chi_squared = np.sum(residuals**2) / dof
+            
+            # Correct covariance calculation for weighted least squares
+            cov = np.linalg.inv(np.dot(J.T, J)) * reduced_chi_squared
 
-            # 95% confidence intervals from standard error
-            z = scipy.stats.t(N-P-1).ppf(0.975)
-            c1 = estimate - z*std
-            c2 = estimate + z*std
+            variances = np.diagonal(cov)
+            if np.any(variances < 0):
+                warnings.warn("\n\nCovariance matrix has negative diagonal elements, indicating non-identifiable parameters. Uncertainties cannot be calculated.\n\n")
+                std = np.full(P, np.nan)
+                low_95 = np.full(P, np.nan)
+                high_95 = np.full(P, np.nan)
+            else:
+                std = np.sqrt(variances)
+                # 95% confidence intervals from t-distribution
+                z = scipy.stats.t(dof).ppf(0.975)
+                low_95 = (estimate - z*std).tolist()
+                high_95 = (estimate + z*std).tolist()
 
-            low_95 = []
-            high_95 = []
-            for i in range(P):
-                low_95.append(c1[i])
-                high_95.append(c2[i])
-
-        except np.linalg.LinAlgError:
-            w = "\n\nJacobian matrix was singular. Could not find parameter uncertainty.\n\n"
+        except (np.linalg.LinAlgError, AttributeError, ValueError) as e:
+            w = f"\n\nCould not calculate parameter uncertainty. Reason: {e}\n\n"
             warnings.warn(w)
 
-            std = np.nan*np.ones(len(estimate),dtype=float)
-            low_95 = np.nan*np.ones(len(estimate),dtype=float)
-            high_95 = np.nan*np.ones(len(estimate),dtype=float)
+            std = np.nan*np.ones(P,dtype=float)
+            low_95 = np.nan*np.ones(P,dtype=float)
+            high_95 = np.nan*np.ones(P,dtype=float)
 
         # Get finalized parameters from param_df in case they were updated 
         # after the model was set and the fit_df created. 
@@ -161,10 +215,23 @@ class MLFitter(Fitter):
                 
         try:
             J = self._fit_result.jac
-            cov = np.linalg.inv(2*np.dot(J.T,J))
+            
+            # Use the same statistically correct covariance matrix as in _update_fit_df
+            residuals = self._fit_result.fun
+            dof = len(self.y_obs) - len(self._fit_result.x)
+            if dof <= 0:
+                raise ValueError("Degrees of freedom must be positive.")
+            reduced_chi_squared = np.sum(residuals**2) / dof
+            cov = np.linalg.inv(np.dot(J.T, J)) * reduced_chi_squared
+            
+            # Check for negative variance before cholesky decomposition
+            if np.any(np.diagonal(cov) < 0):
+                raise np.linalg.LinAlgError("Covariance matrix has negative diagonal elements.")
+
             chol_cov = np.linalg.cholesky(cov).T
-        except np.linalg.LinAlgError:
-            w = "\n\nJacobian matrix was singular. Could not generate parameter samples.\n\n"
+
+        except (np.linalg.LinAlgError, AttributeError, ValueError):
+            w = "\n\nJacobian matrix was singular or covariance matrix was invalid. Could not generate parameter samples.\n\n"
             warnings.warn(w)
 
             # Return empty array
@@ -211,11 +278,21 @@ class MLFitter(Fitter):
         out.append(f"fit has been run: {self._fit_has_been_run}\n")
         if self._fit_has_been_run:
             out.append(f"fit results:\n")
-            if self.success:
+            # Check for success attribute, but also handle interrupted fits
+            if hasattr(self, "_success") and self._success:
+                status = "converged"
+            elif hasattr(self, "_success") and not self._success:
+                status = "failed or interrupted"
+            else:
+                status = "unknown"
+            out.append(f"  fit status: {status}\n")
+
+            # Always try to show the dataframe if it exists
+            if hasattr(self, "_fit_df"):
                 for dataframe_line in repr(self.fit_df).split("\n"):
                     out.append(f"  {dataframe_line}")
                 out.append("\n")
             else:
-                out.append("  fit failed\n")
+                out.append("  fit dataframe not available\n")
 
         return "\n".join(out)

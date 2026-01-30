@@ -5,6 +5,7 @@ values for all fit parameters.
 
 import corner
 import numpy as np
+import matplotlib.pyplot as plt
 
 import re
 import warnings
@@ -108,6 +109,15 @@ def plot_corner(f,filter_params=None,**kwargs):
         kwargs["truths"] = est_values
 
     # Call corner 
+    # Workaround for corner crash on 1D plots (single parameter)
+    if to_plot.shape[1] == 1 and "fig" not in kwargs:
+        fig = plt.figure()
+        kwargs["fig"] = fig
+    
     fig = corner.corner(to_plot,**kwargs)
+
+    # If single parameter, corner returns Axes. Get figure from it.
+    if not hasattr(fig, "savefig") and hasattr(fig, "get_figure"):
+        fig = fig.get_figure()
 
     return fig

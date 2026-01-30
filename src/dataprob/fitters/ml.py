@@ -4,6 +4,8 @@ Fitter subclass for performing maximum likelihood fits.
 
 from dataprob.fitters.base import Fitter
 from dataprob.util.check import check_int
+import traceback
+import pandas as pd
 
 import numpy as np
 import scipy.stats
@@ -79,7 +81,27 @@ class MLFitter(Fitter):
                            self._model.param_df.loc[to_fit,"upper_bound"]]).copy()
         
         # Do the actual fit
-        def fn(*args): return self._weighted_residuals(*args)
+        verbose = kwargs.get("verbose", 0)
+        
+        # Intercept verbose to suppress scipy output and use our own
+        if verbose > 1:
+            kwargs["verbose"] = 0 # Turn off scipy printing
+        
+        def fn(*args): 
+            res = self._weighted_residuals(*args)
+            
+            # Print progress if verbose
+            if verbose > 1:
+                chi2 = np.sum(res**2)
+                N = len(self.y_obs)
+                to_fit = self._model.unfixed_mask
+                P = np.sum(to_fit)
+                dof = N - P
+                if dof > 0:
+                    val = chi2 / dof
+                    print(f"Reduced Chi-Sq: {val:.4e}", end="\r")
+            
+            return res
         
         fit_kwargs = kwargs.copy()
 
@@ -108,6 +130,19 @@ class MLFitter(Fitter):
                                                       x0=guesses,
                                                       bounds=bounds,
                                                       **fit_kwargs)
+            
+            # Print final cost
+            if verbose > 0:
+                cost = self._fit_result.cost # 0.5 * sum(residuals**2)
+                N = len(self.y_obs)
+                P = len(guesses)
+                dof = N - P
+                if dof > 0:
+                    chi2 = 2 * cost
+                    red_chi2 = chi2 / dof
+                    print(f"Final Reduced Chi-Sq: {red_chi2:.4e}")
+                else:
+                    print(f"Final Cost: {cost:.4e} (dof <= 0)")
             self._success = self._fit_result.success
 
         except KeyboardInterrupt:
@@ -187,6 +222,54 @@ class MLFitter(Fitter):
         self._fit_df.loc[unfixed,"std"] = std
         self._fit_df.loc[unfixed,"low_95"] = low_95
         self._fit_df.loc[unfixed,"high_95"] = high_95
+
+        # Check for derived parameters (e.g. Physical params from GlobalModel)
+        model_to_check = self._original_model_object
+        if hasattr(model_to_check, "__self__"):
+            model_to_check = model_to_check.__self__
+
+        if hasattr(model_to_check, "calculate_derived_params") and hasattr(self, "_fit_result"):
+            try:
+                # Recalculate covariance for derived params
+                J = self._fit_result.jac
+                residuals = self._fit_result.fun
+                dof = N - P
+                if dof > 0:
+                    reduced_chi_squared = np.sum(residuals**2) / dof
+                    try:
+                        cov = np.linalg.inv(np.dot(J.T, J)) * reduced_chi_squared
+                    except np.linalg.LinAlgError:
+                        cov = np.linalg.pinv(np.dot(J.T, J)) * reduced_chi_squared
+                    # Expand cov to full parameters (with zeros for fixed)
+                    # IMPORTANT: Only use original parameters (from param_df), ignoring 
+                    # any derived params that might have been appended to fit_df already.
+                    N_orig = len(self.param_df)
+                    
+                    # Get masks for ORIGINAL parameters
+                    fixed_orig = np.array(self._fit_df["fixed"].iloc[:N_orig], dtype=bool)
+                    unfixed_orig = np.logical_not(fixed_orig)
+                    
+                    full_cov = np.zeros((N_orig, N_orig))
+                    # cov from scaler corresponds to unfixed_orig parameters
+                    if cov.shape == (np.sum(unfixed_orig), np.sum(unfixed_orig)):
+                        full_cov[np.ix_(unfixed_orig, unfixed_orig)] = cov
+                    else:
+                        # Fallback if shape mismatch (should not happen in standard flow)
+                        warnings.warn(f"Covariance shape mismatch. Expected {np.sum(unfixed_orig)}x{np.sum(unfixed_orig)}, got {cov.shape}")
+                    
+                    # Get estimates for ORIGINAL parameters
+                    full_estimate = self._fit_df["estimate"].iloc[:N_orig].values.astype(float)
+
+                    derived_df = model_to_check.calculate_derived_params(estimate=full_estimate, cov=full_cov, dof=dof)
+                    if derived_df is not None:
+                        # Append to fit_df
+                        # We use concat
+                        # RESET fit_df to original parameters to avoid accumulation
+                        self._fit_df = self._fit_df.iloc[:N_orig].copy()
+                        self._fit_df = pd.concat([self._fit_df, derived_df])
+            except Exception as e:
+                traceback.print_exc()
+                warnings.warn(f"Could not calculate derived parameters: {e}")
 
 
     @property

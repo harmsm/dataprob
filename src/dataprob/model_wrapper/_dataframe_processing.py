@@ -282,7 +282,7 @@ def validate_dataframe(param_df,
     """
     
     # make sure the input is a dataframe
-    if not issubclass(type(param_df),pd.DataFrame):
+    if not isinstance(param_df, pd.DataFrame):
         err = "\nparam_df should be a pandas DataFrame\n"
         raise ValueError(err)
 

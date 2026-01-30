@@ -7,6 +7,7 @@ from ...util.stats import get_kde_max
 import numpy as np
 import warnings
 import traceback
+import pandas as pd
 
 try:
     import pymc as pm
@@ -38,28 +39,50 @@ class PyMCFitter(Fitter):
             itypes = [pt.dvector]
             otypes = [pt.dmatrix]
 
-            def __init__(self, jacobian_function):
+            def __init__(self, jacobian_function, expected_obs_len, expected_param_len):
                 self.jacobian_function = jacobian_function
+                self.expected_obs_len = expected_obs_len
+                self.expected_param_len = expected_param_len
 
             def perform(self, node, inputs, output_storage):
                 params_numpy = inputs[0]
-                result = self.jacobian_function(params_numpy)
+                try:
+                    result = self.jacobian_function(params_numpy)
+                    # Handle cases where the jacobian calculation fails and returns NaNs
+                    if result is None or not np.all(np.isfinite(result)):
+                        result = np.full((self.expected_obs_len, self.expected_param_len), np.nan)
+                except Exception:
+                    result = np.full((self.expected_obs_len, self.expected_param_len), np.nan)
+                
                 output_storage[0][0] = np.asarray(result, dtype='float64')
+
 
         class NumpyModelOp(Op):
             itypes = [pt.dvector]
             otypes = [pt.dvector]
 
-            def __init__(self, model_function, non_fit_kwargs, jacobian_function=None):
+            def __init__(self, model_function, non_fit_kwargs, y_obs_len, jacobian_function=None, param_len=None):
                 self.model_function = model_function
                 self.non_fit_kwargs = non_fit_kwargs
+                self.y_obs_len = y_obs_len
                 self.jacobian_function = jacobian_function
                 if self.jacobian_function:
-                    self.jacobian_op = NumpyJacobianOp(self.jacobian_function)
+                    self.jacobian_op = NumpyJacobianOp(self.jacobian_function,
+                                                       expected_obs_len=self.y_obs_len,
+                                                       expected_param_len=param_len)
 
             def perform(self, node, inputs, output_storage):
                 params_numpy = inputs[0]
-                result = self.model_function(params_numpy, **self.non_fit_kwargs)
+                try:
+                    result = self.model_function(params_numpy, **self.non_fit_kwargs)
+                    # Defensive check: if the model returns an empty or invalid result,
+                    # return a vector of NaNs. This prevents PyMC from crashing on a
+                    # bad parameter guess.
+                    if result is None or result.shape[0] != self.y_obs_len:
+                        result = np.full(self.y_obs_len, np.nan)
+                except Exception:
+                    result = np.full(self.y_obs_len, np.nan)
+
                 output_storage[0][0] = np.asarray(result, dtype='float64')
 
             def grad(self, inputs, output_grads):
@@ -83,7 +106,9 @@ class PyMCFitter(Fitter):
 
         numpy_model_op = NumpyModelOp(self._model._model_to_fit,
                                       self.non_fit_kwargs,
-                                      jacobian_function=jacobian_function)
+                                      y_obs_len=len(self._y_obs),
+                                      jacobian_function=jacobian_function,
+                                      param_len=len(self.param_df))
 
         with pm.Model() as model:
             params = {}
@@ -155,8 +180,8 @@ class PyMCFitter(Fitter):
             return
 
         estimate = get_kde_max(self._samples)
-        std = np.std(self._samples, axis=0)
-        low_95, high_95 = np.quantile(self._samples, [0.025, 0.975], axis=0)
+        std = np.std(self.samples, axis=0)
+        low_95, high_95 = np.quantile(self.samples, [0.025, 0.975], axis=0)
 
         for col in ["guess", "fixed", "lower_bound", "upper_bound", "prior_mean", "prior_std"]:
             self._fit_df[col] = self.param_df[col]
@@ -167,6 +192,18 @@ class PyMCFitter(Fitter):
         self._fit_df.loc[unfixed, "std"] = std
         self._fit_df.loc[unfixed, "low_95"] = low_95
         self._fit_df.loc[unfixed, "high_95"] = high_95
+
+        # Check for derived parameters
+        fit_func = self._model._model_to_fit
+        if hasattr(fit_func, "__self__"):
+            model_instance = fit_func.__self__
+            if hasattr(model_instance, "calculate_derived_params"):
+                try:
+                    derived_df = model_instance.calculate_derived_params(samples=self._samples)
+                    if derived_df is not None:
+                        self._fit_df = pd.concat([self._fit_df, derived_df])
+                except Exception as e:
+                    warnings.warn(f"Could not calculate derived parameters: {e}")
 
     @property
     def fit_info(self):

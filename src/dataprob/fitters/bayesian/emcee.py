@@ -144,7 +144,7 @@ class EmceeFitter(Fitter):
         
         if num_threads != 1:
             warnings.warn("multithreading has not yet been implemented for emcee backend.")
-        self._num_threads = num_threads
+        self._num_threads = check_int(num_threads, "num_threads", 1)
         
         self._setup_priors()
 
@@ -224,3 +224,30 @@ class EmceeFitter(Fitter):
         if hasattr(self, "_fit_result") and self._fit_result is not None:
             output["Steps taken"] = self._fit_result.iteration
         return output
+
+    def __repr__(self):
+        """
+        Output to show when object is printed or displayed in a jupyter 
+        notebook.
+        """
+
+        out = ["EmceeFitter\n-----------\n"]
+
+        out.append(f"fit has been run: {self._fit_has_been_run}\n")
+        if self._fit_has_been_run:
+            out.append(f"fit results:\n")
+            if self.success:
+                status = "converged"
+            else:
+                status = "failed or interrupted"
+            out.append(f"  fit status: {status}\n")
+
+            # Always try to show the dataframe if it exists
+            if hasattr(self, "_fit_df"):
+                for dataframe_line in repr(self.fit_df).split("\n"):
+                    out.append(f"  {dataframe_line}")
+                out.append("\n")
+            else:
+                out.append("  fit dataframe not available\n")
+
+        return "\n".join(out)

@@ -315,7 +315,7 @@ def test_MLFitter___repr__():
           y_std=[0.1,0.1,0.1])
 
     out = f.__repr__().split("\n")
-    assert len(out) == 14
+    assert len(out) == 16
 
     # hack, run _fit_has_been_run, _fit_failed branch
     f._success = False

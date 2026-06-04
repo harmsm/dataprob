@@ -134,6 +134,7 @@ class EmceeFitter(Fitter):
              burn_in=0.1,
              num_threads=1,
              max_convergence_cycles=1,
+             output_dir=None,
              **emcee_kwargs):
         """Perform Bayesian MCMC sampling of parameter values."""
         self._num_walkers = check_int(num_walkers, "num_walkers", 1)
@@ -141,6 +142,9 @@ class EmceeFitter(Fitter):
         self._num_steps = check_int(num_steps, "num_steps", 1)
         self._burn_in = check_float(burn_in, "burn_in", 0, 1, False, False)
         self._max_convergence_cycles = check_int(max_convergence_cycles, "max_convergence_cycles", 1)
+        if output_dir is not None and not isinstance(output_dir, str):
+            raise TypeError("output_dir must be a string or None")
+        self._output_dir = output_dir
         
         if num_threads != 1:
             warnings.warn("multithreading has not yet been implemented for emcee backend.")
@@ -179,6 +183,23 @@ class EmceeFitter(Fitter):
                 self._samples = chains.reshape((-1, self._initial_state.shape[1]))
                 self._lnprob = self._fit_result.get_log_prob(discard=to_discard).reshape(-1)
                 self._update_fit_df()
+
+                if self._output_dir is not None:
+                    import os
+                    import pandas as pd
+                    os.makedirs(self._output_dir, exist_ok=True)
+
+                    out_df = self._fit_df.copy()
+                    out_df = out_df.replace([np.inf], "inf").replace([-np.inf], "-inf")
+                    out_df.to_csv(os.path.join(self._output_dir, "fit_results.csv"))
+                    print(f"Fit results saved to: {os.path.join(self._output_dir, 'fit_results.csv')}")
+
+                    max_samples = min(10000, self._samples.shape[0])
+                    thin = max(1, self._samples.shape[0] // max_samples)
+                    thinned = self._samples[::thin, :]
+                    pd.DataFrame(thinned, columns=self.param_df.index[~self.param_df["fixed"]]).to_csv(
+                        os.path.join(self._output_dir, "samples.csv"), index=False)
+                    print(f"MCMC samples saved to: {os.path.join(self._output_dir, 'samples.csv')} ({thinned.shape[0]} samples)")
 
     def _update_fit_df(self):
         """Update fit_df with results from the emcee samples."""

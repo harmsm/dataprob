@@ -5,6 +5,7 @@ Public constructor used to set up analyses.
 from dataprob.fitters.ml import MLFitter
 from dataprob.fitters.bootstrap import BootstrapFitter
 from dataprob.fitters.bayesian import EmceeFitter, PyMCFitter
+from dataprob.fitters.hmc import HMCFitter
 
 def setup(some_function,
           method="ml",
@@ -23,8 +24,9 @@ def setup(some_function,
     method : str, default="ml"
         Analysis method to use. Should be "ml" (maximum likelihood), "bootstrap"
         (ml with bootstrap resampling), "emcee" (Bayesian MCMC sampling via
-        the emcee library), or "pymc" (Bayesian MCMC sampling via the PyMC
-        library).
+        the emcee library), "pymc" (Bayesian MCMC sampling via the PyMC
+        library), or "hmc" (Hamiltonian Monte Carlo with optional symbolic
+        Jacobian gradient and mass matrix).
     fit_parameters : list, dict, str, pandas.DataFrame; optional
         fit_parameters lets the user specify information about the parameters
         in the fit. See Note below for details.
@@ -180,7 +182,8 @@ def setup(some_function,
     method_map = {"ml": MLFitter,
                   "bootstrap": BootstrapFitter,
                   "emcee": EmceeFitter,
-                  "pymc": PyMCFitter}
+                  "pymc": PyMCFitter,
+                  "hmc": HMCFitter}
 
     method_key = method.lower()
     if method_key not in method_map:

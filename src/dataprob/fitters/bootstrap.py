@@ -21,35 +21,60 @@ class BootstrapFitter(Fitter):
             y_obs=None,
             y_std=None,
             num_bootstrap=100,
+            output_dir=None,
             **least_squares_kwargs):
         """
-        Fit the model parameters to the data by maximum likelihood, sampling 
-        uncertainty in observation values by bootstrap. 
+        Fit the model parameters to the data by maximum likelihood, sampling
+        uncertainty in observation values by bootstrap.
 
         Parameters
         ----------
         y_obs : numpy.ndarray
             observations in a numpy array of floats that matches the shape
-            of the output of some_function set when initializing the fitter. 
-            nan values are not allowed. y_obs must either be specified here 
-            or in the data_df dataframe. 
+            of the output of some_function set when initializing the fitter.
+            nan values are not allowed. y_obs must either be specified here
+            or in the data_df dataframe.
         y_std : numpy.ndarray
             standard deviation of each observation. nan values are not allowed.
-            y_std must either be specified here or in the data_df dataframe. 
+            y_std must either be specified here or in the data_df dataframe.
         num_bootstrap : int
             Number of bootstrap samples to run
-        **least_squares_kwargs : 
+        output_dir : str, optional
+            Directory path to save fit results. If provided, saves fit_results.csv
+            and samples.csv there.
+        **least_squares_kwargs :
             any remaining keyword arguments are passed as **kwargs to
             scipy.optimize.least_squares
         """
-        
+
         self._num_bootstrap = check_int(value=num_bootstrap,
                                         variable_name="num_bootstrap",
                                         minimum_allowed=2)
 
+        if output_dir is not None and not isinstance(output_dir, str):
+            raise TypeError("output_dir must be a string or None")
+        self._output_dir = output_dir
+
         super().fit(y_obs=y_obs,
                     y_std=y_std,
-                    **least_squares_kwargs)    
+                    **least_squares_kwargs)
+
+        if self._output_dir is not None and self._success:
+            import os
+            import pandas as pd
+            os.makedirs(self._output_dir, exist_ok=True)
+
+            out_df = self._fit_df.copy()
+            out_df = out_df.replace([np.inf], "inf").replace([-np.inf], "-inf")
+            out_df.to_csv(os.path.join(self._output_dir, "fit_results.csv"))
+            print(f"Fit results saved to: {os.path.join(self._output_dir, 'fit_results.csv')}")
+
+            max_samples = min(10000, self._samples.shape[0])
+            thin = max(1, self._samples.shape[0] // max_samples)
+            thinned = self._samples[::thin, :]
+            pd.DataFrame(thinned, columns=self.param_df.index[~self.param_df["fixed"]]).to_csv(
+                os.path.join(self._output_dir, "samples.csv"), index=False)
+            print(f"Bootstrap samples saved to: {os.path.join(self._output_dir, 'samples.csv')} ({thinned.shape[0]} samples)")
 
     def _fit(self,**kwargs):
         """
@@ -156,7 +181,7 @@ class BootstrapFitter(Fitter):
             raise ValueError(err)
 
         # Get mean and standard deviation
-        estimate = get_kde_max(self._samples)
+        estimate = get_kde_max(samples)
         std = np.std(samples,axis=0)
 
         # Calculate 95% confidence intervals

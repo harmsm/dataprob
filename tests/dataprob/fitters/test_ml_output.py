@@ -30,12 +30,7 @@ def test_ml_output_reduced_chi_sq(capsys):
     # Check for final output
     assert "Final Reduced Chi-Sq:" in captured.out
     
-    # Ensure scipy output is suppressed (Cost is usually printed by scipy as 'Cost:')
-    # Scipy verbose 2 prints 'Iteration', 'Cost', 'Cost reduction', 'Step norm', 'Optimality'
-    # Our wrapper sets kwargs['verbose'] = 0 if verbose > 1 passed to fit()
-    # But wait, we set kwargs['verbose'] = 0 *passed to scipy*.
-    # So scipy shouldn't print anything.
-    
-    assert "Iteration" not in captured.out
-    assert "Optimality" not in captured.out
+    # Scipy verbose output (Iteration, Cost, etc.) should also appear
+    # since we pass verbose through to scipy
+    assert "Iteration" in captured.out
 

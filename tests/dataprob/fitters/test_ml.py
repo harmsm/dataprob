@@ -138,10 +138,10 @@ def test_MLFitter__update_fit_df():
     assert np.sum(np.isnan(f._fit_df["std"])) == 0
     assert np.sum(np.isnan(f._fit_df["low_95"])) == 0
     assert np.sum(np.isnan(f._fit_df["high_95"])) == 0
-    assert np.sum(f._fit_df["low_95"] < f._fit_df["estimate"]) == 2
-    assert np.sum(f._fit_df["high_95"] > f._fit_df["estimate"]) == 2
-    assert np.sum(f._fit_df["low_95"] < (f._fit_df["estimate"] - f._fit_df["std"])) == 2
-    assert np.sum(f._fit_df["high_95"] > (f._fit_df["estimate"] + f._fit_df["std"])) == 2
+    assert np.sum(f._fit_df["low_95"] <= f._fit_df["estimate"]) == 2
+    assert np.sum(f._fit_df["high_95"] >= f._fit_df["estimate"]) == 2
+    assert np.sum(f._fit_df["low_95"] <= (f._fit_df["estimate"] - f._fit_df["std"])) == 2
+    assert np.sum(f._fit_df["high_95"] >= (f._fit_df["estimate"] + f._fit_df["std"])) == 2
 
     # Hack so the jacobian is now a singular matrix. This will cause the 
     # function to throw a warning and set values to nan

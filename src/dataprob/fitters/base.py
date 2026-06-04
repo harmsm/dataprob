@@ -109,11 +109,14 @@ class Fitter:
         # record y_obs if specified
         to_df = {}
         if y_obs is not None:
-            to_df["y_obs"] = y_obs
-        
-        # record y_std if specified
+            to_df["y_obs"] = np.asarray(y_obs, dtype=float)
+
+        # record y_std if specified; broadcast scalar to match y_obs length
         if y_std is not None:
-            to_df["y_std"] = y_std
+            y_std_arr = np.asarray(y_std, dtype=float)
+            if y_std_arr.ndim == 0 and "y_obs" in to_df:
+                y_std_arr = np.full(len(to_df["y_obs"]), float(y_std_arr))
+            to_df["y_std"] = y_std_arr
 
         # If both specified, turn into dataframe and store as data_df. Setter 
         # validates. 

@@ -87,8 +87,8 @@ class MLFitter(Fitter):
         import os
         import time
         import csv
-        
-        to_fit = self._model.unfixed_mask
+
+        to_fit = self._model.floating_mask
         guesses = np.array(self._model.param_df.loc[to_fit,"guess"]).copy()
         bounds = np.array([self._model.param_df.loc[to_fit,"lower_bound"],
                            self._model.param_df.loc[to_fit,"upper_bound"]]).copy()
@@ -331,7 +331,8 @@ class MLFitter(Fitter):
 
 
 
-    def _update_fit_df(self):
+
+    def _get_fit_values(self):
         """
         Recalculate the parameter estimates from any new samples.
         """
@@ -382,20 +383,7 @@ class MLFitter(Fitter):
             low_95 = np.nan*np.ones(P,dtype=float)
             high_95 = np.nan*np.ones(P,dtype=float)
 
-        # Get finalized parameters from param_df in case they were updated 
-        # after the model was set and the fit_df created. 
-        for col in ["guess","fixed","lower_bound","upper_bound","prior_mean",
-                    "prior_std"]:
-            self._fit_df[col] = self.param_df[col]
-
-        fixed = np.array(self._fit_df["fixed"],dtype=bool).copy()
-        unfixed = np.logical_not(fixed)
-
-        self._fit_df.loc[unfixed,"estimate"] = estimate
-        self._fit_df.loc[fixed,"estimate"] = self._fit_df.loc[fixed,"guess"]
-        self._fit_df.loc[unfixed,"std"] = std
-        self._fit_df.loc[unfixed,"low_95"] = low_95
-        self._fit_df.loc[unfixed,"high_95"] = high_95
+        return estimate, std, low_95, high_95
 
         # Check for derived parameters (e.g. Physical params from GlobalModel)
         model_to_check = self._original_model_object

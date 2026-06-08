@@ -9,8 +9,8 @@ dataprob
 dataprob lets scientists fit user-defined models to experimental data using a
 simple, consistent interface. Write a Python function that describes your model,
 pass in your observations, and choose a fitting method. dataprob handles the
-rest — maximum likelihood, bootstrap resampling, or Bayesian posterior sampling
-— and returns results as tidy pandas DataFrames.
+rest (maximum likelihood, bootstrap resampling, or Bayesian posterior sampling)
+and returns results as tidy pandas DataFrames.
 
 Installation
 ============
@@ -60,15 +60,44 @@ The following fits a linear model to noisy data using maximum likelihood.
     :alt: plot_corner result for a linear fit
     :width: 75%
 
-Contents
+Overview
 ========
 
 .. toctree::
-   :maxdepth: 2
 
    overview
+
+Maximum Likelihood
+==================
+
+.. toctree::
+
    fitters/ml
+
+Bootstrap
+=========
+
+.. toctree::
+
    fitters/bootstrap
+
+Bayesian MCMC (emcee)
+=====================
+
+.. toctree::
+
    fitters/emcee
+
+Bayesian MCMC (PyMC)
+====================
+
+.. toctree::
+
    fitters/pymc
+
+Hamiltonian Monte Carlo
+=======================
+
+.. toctree::
+
    fitters/hmc

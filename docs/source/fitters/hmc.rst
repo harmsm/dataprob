@@ -213,6 +213,36 @@ fit() kwargs
 +---------------------+--------------------------------------------------+----------+
 | ``hessian_reg``     | Tikhonov regularisation for mass matrix          | ``1e-4`` |
 +---------------------+--------------------------------------------------+----------+
+| ``non_centered``    | Apply non-centered parameterization for params   | ``False``|
+|                     | with Gaussian priors (see below)                 |          |
++---------------------+--------------------------------------------------+----------+
+
+Non-centered parameterization
+==============================
+
+When ``non_centered=True``, any parameter with both ``prior_mean`` and
+``prior_std`` set is reparameterized before sampling.  Instead of drawing
+``theta`` directly, the sampler draws a standard-normal offset:
+
+.. math::
+
+    z \sim \mathcal{N}(0, 1), \qquad \theta = \mu + z\,\sigma
+
+where :math:`\mu` = ``prior_mean`` and :math:`\sigma` = ``prior_std``.
+
+**When to use it:** the non-centered form is preferred when the likelihood is
+weak relative to the prior — i.e., when there are few observations per
+parameter group. In that regime the centered posterior develops a narrow funnel
+geometry that HMC explores slowly. The non-centered form decouples the offset
+:math:`z` from the scale :math:`\sigma`, giving the sampler a much flatter
+geometry to traverse.
+
+Conversely, when the likelihood is strong (many observations per parameter),
+the centered form is often better: the posterior is already tight and the
+extra transformation adds unnecessary complexity.
+
+Parameters with only bounds and no Gaussian prior are unaffected by this
+option.
 
 Interpreting the diagnostic output
 ===================================

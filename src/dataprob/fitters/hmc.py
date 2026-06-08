@@ -197,6 +197,7 @@ class HMCFitter(Fitter):
             checkpoint_steps: int   = 0,
             resume_from: str | None = None,
             hessian_reg: float      = 1e-4,
+            non_centered: bool      = False,
             **kwargs):
         """
         Sample the posterior of the model parameters using HMC.
@@ -235,6 +236,16 @@ class HMCFitter(Fitter):
             Path to a checkpoint file or directory containing
             hmc_checkpoint.npz. When provided, burn-in is skipped and
             sampling continues from the saved state. Default None.
+        non_centered : bool
+            If True, apply the non-centered parameterization for all parameters
+            that have a Gaussian prior (``prior_mean`` and ``prior_std`` both
+            set).  Instead of sampling ``theta`` directly, the sampler draws
+            ``z ~ N(0, 1)`` and recovers ``theta = prior_mean + z * prior_std``
+            at each step.  This removes the correlation between the location/
+            scale hyper-parameters and the per-observation offsets that causes
+            HMC to explore slowly when the likelihood is weak relative to the
+            prior (the "funnel" geometry).  Parameters with only bounds and no
+            Gaussian prior are unaffected.  Default False.
         **kwargs
             Ignored; present for forward-compatibility with the base Fitter
             interface.
@@ -257,6 +268,7 @@ class HMCFitter(Fitter):
         self._checkpoint_steps  = int(checkpoint_steps)
         self._resume_from       = resume_from
         self._hessian_reg       = float(hessian_reg)
+        self._non_centered      = bool(non_centered)
 
         if self._report_steps < 1:
             raise ValueError("report_steps must be >= 1.")
@@ -304,6 +316,43 @@ class HMCFitter(Fitter):
         prior_stds  = np.array(param_df.loc[to_fit_mask, "prior_std"],  dtype=float)
         has_gauss   = np.isfinite(prior_means) & np.isfinite(prior_stds) & (prior_stds > 0)
 
+        # ---- non-centered parameterization setup -----------------------
+        # nc_mask selects which unfixed params get the NC transform.
+        # Only params with a Gaussian prior are eligible: for those we sample
+        # z ~ N(0,1) and recover theta = prior_mean + z * prior_std.
+        # Params with only bounds (uniform prior) are left in direct space.
+        nc_mask = has_gauss & self._non_centered
+
+        if np.any(nc_mask):
+            # Scales and shifts for the z -> theta transform (1 / identity for non-NC)
+            nc_scales = np.where(nc_mask, prior_stds,  1.0)
+            nc_locs   = np.where(nc_mask, prior_means, 0.0)
+
+            def _z_to_theta(z):
+                """Convert sampling coords z to model params theta."""
+                return nc_locs + z * nc_scales
+
+            # Transform initial guesses and bounds into z-space
+            x0_sampling = unfixed_guesses.copy()
+            x0_sampling[nc_mask] = ((unfixed_guesses[nc_mask] - prior_means[nc_mask])
+                                    / prior_stds[nc_mask])
+            s_lower = lower_bounds.copy()
+            s_upper = upper_bounds.copy()
+            s_lower[nc_mask] = ((lower_bounds[nc_mask] - prior_means[nc_mask])
+                                / prior_stds[nc_mask])
+            s_upper[nc_mask] = ((upper_bounds[nc_mask] - prior_means[nc_mask])
+                                / prior_stds[nc_mask])
+            nc_label = (f"non-centered ({int(nc_mask.sum())} of {n_unfixed} params)")
+            print(f"  [non-centered] NC params: "
+                  + ", ".join(n for n, m in zip(unfixed_names, nc_mask) if m))
+        else:
+            # Identity transform — sampling coords == model params
+            _z_to_theta  = None
+            x0_sampling  = unfixed_guesses.copy()
+            s_lower      = lower_bounds.copy()
+            s_upper      = upper_bounds.copy()
+            nc_label     = "centered"
+
         # ---- full-param helper -----------------------------------------
         full_template = np.array(param_df["guess"], dtype=float)
 
@@ -312,38 +361,57 @@ class HMCFitter(Fitter):
             p[to_fit_indices] = u
             return p
 
-        # ---- log-prior and its gradient --------------------------------
-        def _ln_prior(u):
-            if np.any(u < lower_bounds) or np.any(u > upper_bounds):
+        # ---- log-prior and its gradient (in sampling / z-space) --------
+        def _ln_prior(z):
+            if np.any(z < s_lower) or np.any(z > s_upper):
                 return -np.inf
             lp = 0.0
-            if np.any(has_gauss):
-                z   = (u[has_gauss] - prior_means[has_gauss]) / prior_stds[has_gauss]
-                lp += float(np.sum(scipy.stats.norm.logpdf(z)))
+            if np.any(nc_mask):
+                # NC params: prior absorbed into N(0,1) in z-space
+                lp += float(np.sum(scipy.stats.norm.logpdf(z[nc_mask])))
+                # Centered params that still have a Gaussian prior
+                centered_gauss = has_gauss & ~nc_mask
+                if np.any(centered_gauss):
+                    dz = ((z[centered_gauss] - prior_means[centered_gauss])
+                          / prior_stds[centered_gauss])
+                    lp += float(np.sum(scipy.stats.norm.logpdf(dz)))
+            elif np.any(has_gauss):
+                dz  = (z[has_gauss] - prior_means[has_gauss]) / prior_stds[has_gauss]
+                lp += float(np.sum(scipy.stats.norm.logpdf(dz)))
             return lp
 
-        def _grad_ln_prior(u):
+        def _grad_ln_prior(z):
             g = np.zeros(n_unfixed)
-            if np.any(has_gauss):
-                g[has_gauss] = (-(u[has_gauss] - prior_means[has_gauss])
+            if np.any(nc_mask):
+                # d/dz_i [ -0.5 z_i^2 ] = -z_i  for NC params
+                g[nc_mask] = -z[nc_mask]
+                centered_gauss = has_gauss & ~nc_mask
+                if np.any(centered_gauss):
+                    g[centered_gauss] = (-(z[centered_gauss] - prior_means[centered_gauss])
+                                         / prior_stds[centered_gauss] ** 2)
+            elif np.any(has_gauss):
+                g[has_gauss] = (-(z[has_gauss] - prior_means[has_gauss])
                                 / prior_stds[has_gauss] ** 2)
             return g
 
         # ---- finite-difference gradient fallback -----------------------
         _eps = 1e-5
 
-        def _grad_ln_like_fd(y_calc_center, u):
-            """Forward finite-difference gradient reusing the center y_calc."""
+        def _grad_ln_like_fd(y_calc_center, z):
+            """Forward finite-difference gradient reusing the center y_calc.
+            Perturbations are in sampling (z) space; each perturbed z is
+            converted to theta before calling the model."""
             grad  = np.zeros(n_unfixed)
             sigma2 = self._y_std ** 2
             ll_c  = -0.5 * np.sum((y_calc_center - self._y_obs) ** 2 / sigma2)
             for i in range(n_unfixed):
-                u2 = u.copy(); u2[i] += _eps
+                z2 = z.copy(); z2[i] += _eps
+                theta2 = _z_to_theta(z2) if _z_to_theta is not None else z2
                 try:
                     if hasattr(self._model_obj, "model_normalized") and callable(self._model_obj.model_normalized):
-                        y2   = self._model_obj.model_normalized(_full(u2))
+                        y2   = self._model_obj.model_normalized(_full(theta2))
                     else:
-                        y2   = self._model.fast_model(_full(u2))
+                        y2   = self._model.fast_model(_full(theta2))
                     ll2  = -0.5 * np.sum((y2 - self._y_obs) ** 2 / sigma2)
                     grad[i] = (ll2 - ll_c) / _eps
                 except Exception:
@@ -356,19 +424,21 @@ class HMCFitter(Fitter):
         # giving one model evaluation per call instead of two.
         _model_error_shown = [False]
 
-        def logprob_and_grad(u):
-            lp = _ln_prior(u)
+        def logprob_and_grad(z):
+            lp = _ln_prior(z)
             if not np.isfinite(lp):
-                # Outside bounds: repelling gradient toward interior
+                # Outside bounds: repelling gradient toward interior (in z-space)
                 grad = np.zeros(n_unfixed)
                 for i in range(n_unfixed):
-                    if u[i] < lower_bounds[i]:
-                        grad[i] = lower_bounds[i] - u[i]
-                    elif u[i] > upper_bounds[i]:
-                        grad[i] = upper_bounds[i] - u[i]
+                    if z[i] < s_lower[i]:
+                        grad[i] = s_lower[i] - z[i]
+                    elif z[i] > s_upper[i]:
+                        grad[i] = s_upper[i] - z[i]
                 return -1e30, grad
 
-            p = _full(u)
+            # Convert sampling coords to model params
+            theta = _z_to_theta(z) if _z_to_theta is not None else z
+            p = _full(theta)
             try:
                 if hasattr(self._model_obj, "model_normalized") and callable(self._model_obj.model_normalized):
                     y_calc = self._model_obj.model_normalized(p)   # single forward pass
@@ -396,12 +466,16 @@ class HMCFitter(Fitter):
                 # is doubly normalised (y_norm_std AND y_std_scalar both folded
                 # into y_std).  We must weight J by 1/y_std so the dot product
                 # -J_w^T @ r uses a consistent normalisation on both sides.
-                J_w_uf  = J_uf / self._y_std[:, np.newaxis]             # (n_obs, n_unfixed)
-                grad_ll = -J_w_uf.T @ (y_calc - self._y_obs)
+                J_w_uf       = J_uf / self._y_std[:, np.newaxis]        # (n_obs, n_unfixed)
+                grad_ll_theta = -J_w_uf.T @ (y_calc - self._y_obs)
+                # Chain rule: d(logL)/dz_i = d(logL)/dtheta_i * dtheta_i/dz_i
+                # dtheta_i/dz_i = nc_scales[i] (prior_std for NC params, 1 otherwise)
+                grad_ll = (grad_ll_theta * nc_scales
+                           if np.any(nc_mask) else grad_ll_theta)
             else:
-                grad_ll = _grad_ln_like_fd(y_calc, u)
+                grad_ll = _grad_ln_like_fd(y_calc, z)
 
-            return logp, grad_ll + _grad_ln_prior(u)
+            return logp, grad_ll + _grad_ln_prior(z)
 
         # ---- output paths ----------------------------------------------
         fit_summary_file = None
@@ -414,7 +488,7 @@ class HMCFitter(Fitter):
 
         # ---- run HMC ---------------------------------------------------
         rng = np.random.default_rng(self._random_seed)
-        x0  = unfixed_guesses.copy()
+        x0  = x0_sampling       # initial point in sampling (z) space
         d   = x0.shape[0]
 
         _adapt_note = (f", target_accept={self._target_accept:.2f} [dual-averaging]"
@@ -486,8 +560,8 @@ class HMCFitter(Fitter):
                 _ckpt           = np.load(_rpath, allow_pickle=True)
                 _resume_samples = _ckpt['samples']                       # (k, d)
                 q_current       = _ckpt['q_current'].copy()
-                lp_current      = float(_ckpt['lp_current'])
                 self._step_size = float(_ckpt['step_size'])
+                lp_current, _   = logprob_and_grad(q_current)
                 n_accepted      = int(_ckpt['n_accepted'])
                 rng.bit_generator.state = _ckpt['rng_state'].item()
                 _resuming = True
@@ -525,7 +599,8 @@ class HMCFitter(Fitter):
         print(f"HMCFitter: drawing {self._n_samples} samples total "
               f"({_n_remaining} remaining) "
               f"(step_size={self._step_size}, n_steps={self._n_steps}, "
-              f"gradient={self._gradient_type}, mass={_mass_type}{_adapt_note if not _resuming else ''})",
+              f"gradient={self._gradient_type}, mass={_mass_type}, "
+              f"parameterization={nc_label}{_adapt_note if not _resuming else ''})",
               flush=True)
         fit_start   = time.time()
         raw_samples = np.empty((_n_remaining, d))
@@ -650,7 +725,7 @@ class HMCFitter(Fitter):
             if _resume_samples is not None:
                 # resume: all resume_samples + all new samples are post-burn-in
                 _all_raw = np.vstack([_resume_samples, raw_samples])
-                # save final checkpoint
+                # save final checkpoint (in z-space, before back-transform)
                 _save_checkpoint(_all_raw, q_current, lp_current,
                                  self._step_size, n_accepted)
                 self._samples = _all_raw.copy()
@@ -660,6 +735,13 @@ class HMCFitter(Fitter):
                 # (extended) in exactly the same way as an interrupted one.
                 _save_checkpoint(self._samples, q_current, lp_current,
                                  self._step_size, n_accepted)
+
+            # Transform samples from z-space back to theta-space
+            if np.any(nc_mask):
+                self._samples = self._samples.copy()
+                self._samples[:, nc_mask] = (prior_means[nc_mask]
+                                             + self._samples[:, nc_mask]
+                                             * prior_stds[nc_mask])
             if _resume_samples is not None:
                 self._acceptance_rate = n_accepted / self._samples.shape[0]
             else:
@@ -771,15 +853,16 @@ class HMCFitter(Fitter):
     def fit_info(self):
         """Summary dictionary of HMC run configuration and results."""
         info = {
-            "Backend":            "HMC (leapfrog, built-in)",
-            "Gradient type":      getattr(self, "_gradient_type", "unknown"),
-            "n_samples":          self._n_samples,
-            "burn_in":            self._burn_in,
-            "initial_step_size":  getattr(self, "_initial_step_size", self._step_size),
-            "adapted_step_size":  self._step_size,
-            "target_accept":      getattr(self, "_target_accept", 0.65),
-            "n_steps_per_sample": self._n_steps,
-            "success":            self._success,
+            "Backend":              "HMC (leapfrog, built-in)",
+            "Gradient type":        getattr(self, "_gradient_type", "unknown"),
+            "Parameterization":     "non-centered" if getattr(self, "_non_centered", False) else "centered",
+            "n_samples":            self._n_samples,
+            "burn_in":              self._burn_in,
+            "initial_step_size":    getattr(self, "_initial_step_size", self._step_size),
+            "adapted_step_size":    self._step_size,
+            "target_accept":        getattr(self, "_target_accept", 0.65),
+            "n_steps_per_sample":   self._n_steps,
+            "success":              self._success,
         }
         if hasattr(self, "_acceptance_rate"):
             info["acceptance_rate"] = self._acceptance_rate
@@ -799,6 +882,7 @@ class HMCFitter(Fitter):
             writer.writerow(["metric", "value"])
             writer.writerow(["total_time_seconds",   f"{self._total_time:.6f}"])
             writer.writerow(["gradient_type",         self._gradient_type])
+            writer.writerow(["parameterization",      "non-centered" if getattr(self, "_non_centered", False) else "centered"])
             writer.writerow(["n_samples_requested",   self._n_samples])
             writer.writerow(["burn_in",                self._burn_in])
             writer.writerow(["initial_step_size",      getattr(self, "_initial_step_size", self._step_size)])
